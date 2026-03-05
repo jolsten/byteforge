@@ -21,7 +21,7 @@ class OffsetBinary(Encoding):
 
     def encode(self, values: npt.ArrayLike) -> np.ndarray:
         arr = np.asarray(values)
-        if np.issubdtype(arr.dtype, np.integer):
+        if np.isdtype(arr.dtype, "integral"):
             clamped = np.clip(arr, self._min_value, self._max_value).astype(np.int64)
         else:
             clamped = np.clip(

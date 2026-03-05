@@ -8,12 +8,15 @@ authors = [
 ]
 requires-python = ">=3.9"
 dependencies = [
-    "numpy>=1.26",
+    "numpy>=2.0",
 ]
 
 [build-system]
-requires = ["uv_build>=0.9.28,<0.10.0"]
-build-backend = "uv_build"
+requires = ["setuptools>=64", "numpy>=2.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [dependency-groups]
 dev = [
@@ -40,9 +43,13 @@ known-first-party = ["byteforge"]
 
 [tool.mypy]
 python_version = "3.9"
-warn_return_any = true
+warn_return_any = false
 warn_unused_configs = true
 disallow_untyped_defs = true
 check_untyped_defs = true
 packages = ["byteforge"]
 mypy_path = "src"
+
+[[tool.mypy.overrides]]
+module = "byteforge._c.*"
+ignore_missing_imports = true

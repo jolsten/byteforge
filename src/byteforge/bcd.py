@@ -1,3 +1,4 @@
+import os
 from typing import Union
 
 import numpy as np
@@ -5,6 +6,16 @@ import numpy.typing as npt
 
 from ._base import Encoding
 from ._registry import register
+
+_HAS_C = False
+if not os.environ.get("BYTEFORGE_NO_C"):
+    try:
+        from byteforge._c.ufunc import bcd_decode as _c_bcd_decode
+        from byteforge._c.ufunc import bcd_encode as _c_bcd_encode
+
+        _HAS_C = True
+    except ImportError:
+        pass
 
 
 @register("bcd")
@@ -14,20 +25,16 @@ class BCD(Encoding):
     Each 4-bit nibble stores a single decimal digit (0-9).
     The bit_width must be a multiple of 4.
 
-    Parameters
-    ----------
-    bit_width : int
-        Number of bits (must be a multiple of 4, range 4-64).
-    errors : str, int, or float
-        How to handle invalid BCD nibbles (>=10) during decode:
-        - ``"raise"`` (default): raise ``ValueError``
-        - ``"nan"``: return ``float64`` with ``np.nan`` for invalid elements
-        - numeric value: substitute this sentinel for invalid elements
+    Args:
+        bit_width: Number of bits (must be a multiple of 4, range 4-64).
+        errors: How to handle invalid BCD nibbles (>=10) during decode:
+
+            - ``"raise"`` (default): raise ``ValueError``
+            - ``"nan"``: return ``float64`` with ``np.nan`` for invalid elements
+            - numeric value: substitute this sentinel for invalid elements
     """
 
-    def __init__(
-        self, bit_width: int, *, errors: Union[str, int, float] = "raise"
-    ) -> None:
+    def __init__(self, bit_width: int, *, errors: Union[str, int, float] = "raise") -> None:
         if bit_width % 4 != 0:
             raise ValueError(f"BCD bit_width must be a multiple of 4, got {bit_width}")
         if not 4 <= bit_width <= 64:
@@ -55,34 +62,67 @@ class BCD(Encoding):
             self._max_bcd_value,
         ).astype(np.uint64)
 
+        if _HAS_C:
+            return _c_bcd_encode(arr, np.uint8(self._max_digits)).astype(self._dn_dtype)  # type: ignore[possibly-undefined]
+        return self._encode_py(arr)
+
+    def _encode_py(self, arr: np.ndarray) -> np.ndarray:
         result = np.zeros_like(arr, dtype=np.uint64)
         remaining = arr.copy()
         for i in range(self._max_digits):
-            digit = remaining % np.uint64(10)
-            result |= digit << np.uint64(i * 4)
-            remaining //= np.uint64(10)
+            digit = remaining % 10
+            result |= digit << (i * 4)
+            remaining //= 10
         return result.astype(self._dn_dtype)
 
     def decode(self, dns: npt.ArrayLike) -> np.ndarray:
         arr = np.asarray(dns, dtype=np.uint64)
         self._validate_dns(arr)
 
+        if _HAS_C:
+            return self._decode_c(arr)
+        return self._decode_py(arr)
+
+    def _decode_c(self, arr: np.ndarray) -> np.ndarray:
+        raw = _c_bcd_decode(arr, np.uint8(self._max_digits))  # type: ignore[possibly-undefined]
+        sentinel = np.uint64(np.iinfo(np.uint64).max)
+        invalid = raw == sentinel
+        if np.any(invalid):
+            if self._errors == "raise":
+                # Rescan in Python for detailed error message
+                bad_idx = np.where(invalid)[0][0]
+                dn_val = arr[bad_idx]
+                for pos in range(self._max_digits):
+                    nib = int((dn_val >> (pos * 4)) & 0xF)
+                    if nib >= 10:
+                        raise ValueError(
+                            f"Invalid BCD nibble {nib} at position {pos} in DN {dn_val}"
+                        )
+            if self._errors == "nan":
+                out = raw.astype(np.float64)
+                out[invalid] = np.nan
+                return out
+            raw[invalid] = np.uint64(self._errors)
+        if self._errors == "nan":
+            return raw.astype(np.float64)
+        return raw.astype(self._dn_dtype)
+
+    def _decode_py(self, arr: np.ndarray) -> np.ndarray:
         result = np.zeros_like(arr, dtype=np.uint64)
         invalid = np.zeros(arr.shape, dtype=bool)
-        multiplier = np.uint64(1)
+        multiplier = 1
         for i in range(self._max_digits):
-            nibble = (arr >> np.uint64(i * 4)) & np.uint64(0xF)
+            nibble = (arr >> (i * 4)) & 0xF
             bad = nibble > 9
             if np.any(bad):
                 if self._errors == "raise":
                     bad_idx = np.where(bad)[0][0]
                     raise ValueError(
-                        f"Invalid BCD nibble {nibble[bad_idx]} at position {i} "
-                        f"in DN {arr[bad_idx]}"
+                        f"Invalid BCD nibble {nibble[bad_idx]} at position {i} in DN {arr[bad_idx]}"
                     )
                 invalid |= bad
             result += nibble * multiplier
-            multiplier *= np.uint64(10)
+            multiplier *= 10
 
         if self._errors == "nan":
             out = result.astype(np.float64)

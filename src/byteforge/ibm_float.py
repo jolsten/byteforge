@@ -1,8 +1,30 @@
+import os
+
 import numpy as np
 import numpy.typing as npt
 
 from ._base import Encoding
 from ._registry import register
+
+_HAS_C = False
+if not os.environ.get("BYTEFORGE_NO_C"):
+    try:
+        from byteforge._c.ufunc import (
+            ibm32_decode as _c_ibm32_decode,
+        )
+        from byteforge._c.ufunc import (
+            ibm32_encode as _c_ibm32_encode,
+        )
+        from byteforge._c.ufunc import (
+            ibm64_decode as _c_ibm64_decode,
+        )
+        from byteforge._c.ufunc import (
+            ibm64_encode as _c_ibm64_encode,
+        )
+
+        _HAS_C = True
+    except ImportError:
+        pass
 
 _VALID_WIDTHS = frozenset((32, 64))
 
@@ -27,12 +49,21 @@ class IBMFloat(Encoding):
             raise ValueError(f"IBMFloat bit_width must be 32 or 64, got {bit_width}")
         super().__init__(bit_width)
         self._mant_bits = bit_width - 8  # 24 for IBM32, 56 for IBM64
-        self._mant_mask = np.uint64((1 << self._mant_bits) - 1)
-        self._exp_shift = np.uint64(self._mant_bits)
-        self._sign_shift = np.uint64(bit_width - 1)
+        self._mant_mask = (1 << self._mant_bits) - 1
+        self._exp_shift = self._mant_bits
+        self._sign_shift = bit_width - 1
 
     def encode(self, values: npt.ArrayLike) -> np.ndarray:
         fval = np.asarray(values, dtype=np.float64)
+
+        if _HAS_C:
+            if self.bit_width == 32:
+                return _c_ibm32_encode(fval)  # type: ignore[possibly-undefined]
+            else:
+                return _c_ibm64_encode(fval)  # type: ignore[possibly-undefined]
+        return self._encode_py(fval)
+
+    def _encode_py(self, fval: np.ndarray) -> np.ndarray:
         mbits = self._mant_bits
         result = np.zeros(fval.shape, dtype=np.uint64)
 
@@ -62,7 +93,7 @@ class IBMFloat(Encoding):
             mant_frac,
         )
 
-        m_val = np.round(mant_frac * np.float64(1 << mbits)).astype(np.uint64)
+        m_val = np.round(mant_frac * float(1 << mbits)).astype(np.uint64)
         m_val = np.minimum(m_val, self._mant_mask)
 
         e_biased = np.clip(hex_exp + 64, 0, 127).astype(np.uint64)
@@ -75,25 +106,34 @@ class IBMFloat(Encoding):
     def decode(self, dns: npt.ArrayLike) -> np.ndarray:
         arr = np.asarray(dns, dtype=np.uint64)
         self._validate_dns(arr)
+
+        if _HAS_C:
+            if self.bit_width == 32:
+                return _c_ibm32_decode(arr.astype(np.uint32))  # type: ignore[possibly-undefined]
+            else:
+                return _c_ibm64_decode(arr)  # type: ignore[possibly-undefined]
+        return self._decode_py(arr)
+
+    def _decode_py(self, arr: np.ndarray) -> np.ndarray:
         mbits = self._mant_bits
 
-        s = (arr >> self._sign_shift) & np.uint64(1)
-        e = (arr >> self._exp_shift) & np.uint64(0x7F)
+        s = (arr >> self._sign_shift) & 1
+        e = (arr >> self._exp_shift) & 0x7F
         m = arr & self._mant_mask
 
         # value = (-1)^s * (m / 2^mbits) * 16^(e - 64)
-        sign = np.where(s == np.uint64(0), 1.0, -1.0)
-        M = m.astype(np.float64) / np.float64(1 << min(mbits, 52))
+        sign = np.where(s == 0, 1.0, -1.0)
+        M = m.astype(np.float64) / float(1 << min(mbits, 52))
         if mbits > 52:
             # For IBM64 (56-bit mantissa), avoid precision loss from 1<<56
-            M = M / np.float64(1 << (mbits - 52))
+            M = M / float(1 << (mbits - 52))
         E = e.astype(np.int64) - 64
 
         # 16^E = 2^(4*E)
         result = sign * M * np.exp2(4.0 * E.astype(np.float64))
 
         # m == 0 means zero
-        result = np.where(m == np.uint64(0), 0.0, result)
+        result = np.where(m == 0, 0.0, result)
         return result
 
     @property

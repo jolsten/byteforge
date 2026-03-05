@@ -25,7 +25,7 @@ class OnesComplement(Encoding):
 
     def encode(self, values: npt.ArrayLike) -> np.ndarray:
         arr = np.asarray(values)
-        if np.issubdtype(arr.dtype, np.integer):
+        if np.isdtype(arr.dtype, "integral"):
             clamped = np.clip(arr, self._min_signed, self._max_signed).astype(np.int64)
         else:
             clamped = np.clip(
@@ -34,11 +34,9 @@ class OnesComplement(Encoding):
                 self._max_signed,
             ).astype(np.int64)
         negative = clamped < 0
-        # Use uint64 arithmetic to avoid overflow at bit_width=64.
-        mask_u = np.uint64(self._mask)
         result = np.where(
             negative,
-            mask_u - (-clamped).astype(np.uint64),
+            self._mask - (-clamped).astype(np.uint64),
             clamped.astype(np.uint64),
         )
         return result.astype(self._dn_dtype)
@@ -46,10 +44,9 @@ class OnesComplement(Encoding):
     def decode(self, dns: npt.ArrayLike) -> np.ndarray:
         arr = np.asarray(dns, dtype=np.uint64)
         self._validate_dns(arr)
-        sign_bit = np.uint64(1 << (self.bit_width - 1))
+        sign_bit = 1 << (self.bit_width - 1)
         is_negative = (arr & sign_bit) != 0
-        # Use uint64 subtraction then cast, avoiding int64 overflow at bit_width=64.
-        neg_val = -((np.uint64(self._mask) - arr).astype(np.int64))
+        neg_val = -((self._mask - arr).astype(np.int64))
         pos_val = arr.astype(np.int64)
         result = np.where(is_negative, neg_val, pos_val)
         return result.astype(self._int_dtype)

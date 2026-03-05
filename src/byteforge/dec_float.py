@@ -1,8 +1,36 @@
+import os
+
 import numpy as np
 import numpy.typing as npt
 
 from ._base import Encoding
 from ._registry import register
+
+_HAS_C = False
+if not os.environ.get("BYTEFORGE_NO_C"):
+    try:
+        from byteforge._c.ufunc import (
+            dec32_decode as _c_dec32_decode,
+        )
+        from byteforge._c.ufunc import (
+            dec32_encode as _c_dec32_encode,
+        )
+        from byteforge._c.ufunc import (
+            dec64_decode as _c_dec64_decode,
+        )
+        from byteforge._c.ufunc import (
+            dec64_encode as _c_dec64_encode,
+        )
+        from byteforge._c.ufunc import (
+            dec64g_decode as _c_dec64g_decode,
+        )
+        from byteforge._c.ufunc import (
+            dec64g_encode as _c_dec64g_encode,
+        )
+
+        _HAS_C = True
+    except ImportError:
+        pass
 
 _DEC_VALID_WIDTHS = frozenset((32, 64))
 
@@ -32,13 +60,24 @@ class DECFloat(Encoding):
         self._init_masks()
 
     def _init_masks(self) -> None:
-        self._mant_mask = np.uint64((1 << self._mant_bits) - 1)
-        self._exp_mask = np.uint64((1 << self._exp_bits) - 1)
-        self._exp_shift = np.uint64(self._mant_bits)
-        self._sign_shift = np.uint64(self._mant_bits + self._exp_bits)
+        self._mant_mask = (1 << self._mant_bits) - 1
+        self._exp_mask = (1 << self._exp_bits) - 1
+        self._exp_shift = self._mant_bits
+        self._sign_shift = self._mant_bits + self._exp_bits
 
     def encode(self, values: npt.ArrayLike) -> np.ndarray:
         fval = np.asarray(values, dtype=np.float64)
+
+        if _HAS_C:
+            if self.bit_width == 32:
+                return _c_dec32_encode(fval)  # type: ignore[possibly-undefined]
+            elif self._exp_bits == 11:
+                return _c_dec64g_encode(fval)  # type: ignore[possibly-undefined]
+            else:
+                return _c_dec64_encode(fval)  # type: ignore[possibly-undefined]
+        return self._encode_py(fval)
+
+    def _encode_py(self, fval: np.ndarray) -> np.ndarray:
         result = np.zeros(fval.shape, dtype=np.uint64)
 
         nonzero = fval != 0.0
@@ -60,7 +99,7 @@ class DECFloat(Encoding):
 
         # Extract mantissa: m = round((significand - 0.5) * 2^(mant_bits+1))
         m_frac = significand - 0.5
-        m_val = np.round(m_frac * np.exp2(np.float64(self._mant_bits + 1))).astype(np.uint64)
+        m_val = np.round(m_frac * np.exp2(self._mant_bits + 1)).astype(np.uint64)
         m_val = np.minimum(m_val, self._mant_mask)
 
         # Biased exponent, clamped (e=0 reserved for zero)
@@ -79,19 +118,31 @@ class DECFloat(Encoding):
         arr = np.asarray(dns, dtype=np.uint64)
         self._validate_dns(arr)
 
-        s = (arr >> self._sign_shift) & np.uint64(1)
+        if _HAS_C:
+            if self.bit_width == 32:
+                return _c_dec32_decode(  # type: ignore[possibly-undefined]
+                    arr.astype(np.uint32)
+                )
+            elif self._exp_bits == 11:
+                return _c_dec64g_decode(arr)  # type: ignore[possibly-undefined]
+            else:
+                return _c_dec64_decode(arr)  # type: ignore[possibly-undefined]
+        return self._decode_py(arr)
+
+    def _decode_py(self, arr: np.ndarray) -> np.ndarray:
+        s = (arr >> self._sign_shift) & 1
         e = (arr >> self._exp_shift) & self._exp_mask
         m = arr & self._mant_mask
 
         # value = (-1)^s * (m / 2^(mant_bits+1) + 0.5) * 2^(e - bias)
-        sign = np.where(s == np.uint64(0), 1.0, -1.0)
-        M = m.astype(np.float64) / np.exp2(np.float64(self._mant_bits + 1)) + 0.5
+        sign = np.where(s == 0, 1.0, -1.0)
+        M = m.astype(np.float64) / np.exp2(self._mant_bits + 1) + 0.5
         E = e.astype(np.int64) - self._bias
 
         result = sign * M * np.exp2(E.astype(np.float64))
 
         # e == 0 is reserved (zero)
-        result = np.where(e == np.uint64(0), 0.0, result)
+        result = np.where(e == 0, 0.0, result)
         return result
 
     @property

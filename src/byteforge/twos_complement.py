@@ -20,7 +20,7 @@ class TwosComplement(Encoding):
         # For bit_width <= 53, float64 round-trip is fine.
         # For bit_width > 53, we accept int-typed arrays directly to avoid precision loss.
         arr = np.asarray(values)
-        if np.issubdtype(arr.dtype, np.integer):
+        if np.isdtype(arr.dtype, "integral"):
             clamped = np.clip(arr, self._min_signed, self._max_signed).astype(np.int64)
         else:
             clamped = np.clip(
@@ -29,11 +29,9 @@ class TwosComplement(Encoding):
                 self._max_signed,
             ).astype(np.int64)
         # Two's complement: negative values become unsigned via wrapping.
-        # Use numpy uint64 arithmetic to avoid Python int overflow at bit_width=64.
         result = clamped.view(np.uint64)
         if self.bit_width < 64:
-            mask = np.uint64((1 << self.bit_width) - 1)
-            result = result & mask
+            result = result & ((1 << self.bit_width) - 1)
         return result.astype(self._dn_dtype)
 
     def decode(self, dns: npt.ArrayLike) -> np.ndarray:
@@ -43,10 +41,10 @@ class TwosComplement(Encoding):
             # uint64 -> int64 view is already two's complement
             return arr.view(np.int64).astype(self._int_dtype)
         # Sign-extend: set all bits above bit_width to 1 for negative values
-        sign_bit = np.uint64(1 << (self.bit_width - 1))
+        sign_bit = 1 << (self.bit_width - 1)
         is_negative = (arr & sign_bit) != 0
         # Create sign-extension mask: all 1s above bit_width
-        extend_mask = np.uint64(np.iinfo(np.uint64).max) - np.uint64((1 << self.bit_width) - 1)
+        extend_mask = np.iinfo(np.uint64).max - ((1 << self.bit_width) - 1)
         extended = np.where(is_negative, arr | extend_mask, arr)
         return extended.view(np.int64).astype(self._int_dtype)
 

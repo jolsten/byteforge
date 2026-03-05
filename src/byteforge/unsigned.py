@@ -12,15 +12,15 @@ class Unsigned(Encoding):
 
     def encode(self, values: npt.ArrayLike) -> np.ndarray:
         arr = np.asarray(values)
-        if np.issubdtype(arr.dtype, np.integer):
+        if np.isdtype(arr.dtype, "integral"):
             clamped = np.clip(arr, 0, self.max_unsigned).astype(np.uint64)
         else:
             # float64 can't exactly represent large uint64 values;
             # e.g. float64(2^64-1) rounds to 2^64, overflowing uint64 on cast.
             # Cap to the largest float64 below 2^bit_width.
-            upper = np.float64(self.max_unsigned)
+            upper = float(self.max_unsigned)
             if int(upper) > self.max_unsigned:
-                upper = np.nextafter(upper, np.float64(0))
+                upper = np.nextafter(upper, 0.0)
             clamped = np.clip(np.round(arr.astype(np.float64)), 0, upper).astype(np.uint64)
         return clamped.astype(self._dn_dtype)
 
@@ -35,7 +35,17 @@ class Unsigned(Encoding):
 
     @classmethod
     def from_range(cls, *, max_value: int) -> "Unsigned":
-        """Construct from the maximum value that needs to be represented."""
+        """Construct from the maximum value that needs to be represented.
+
+        Args:
+            max_value: The largest value to encode.
+
+        Returns:
+            An Unsigned encoding with the minimum required bit width.
+
+        Raises:
+            ValueError: If ``max_value`` is negative.
+        """
         if max_value < 0:
             raise ValueError(f"max_value must be >= 0, got {max_value}")
         bit_width = max(1, max_value.bit_length())

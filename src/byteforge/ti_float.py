@@ -1,8 +1,30 @@
+import os
+
 import numpy as np
 import numpy.typing as npt
 
 from ._base import Encoding
 from ._registry import register
+
+_HAS_C = False
+if not os.environ.get("BYTEFORGE_NO_C"):
+    try:
+        from byteforge._c.ufunc import (
+            ti32_decode as _c_ti32_decode,
+        )
+        from byteforge._c.ufunc import (
+            ti32_encode as _c_ti32_encode,
+        )
+        from byteforge._c.ufunc import (
+            ti40_decode as _c_ti40_decode,
+        )
+        from byteforge._c.ufunc import (
+            ti40_encode as _c_ti40_encode,
+        )
+
+        _HAS_C = True
+    except ImportError:
+        pass
 
 _VALID_WIDTHS = frozenset((32, 40))
 
@@ -28,18 +50,27 @@ class TIFloat(Encoding):
             raise ValueError(f"TIFloat bit_width must be 32 or 40, got {bit_width}")
         super().__init__(bit_width)
         self._mant_bits = bit_width - 9  # 23 for TI32, 31 for TI40
-        self._mant_mask = np.uint64((1 << self._mant_bits) - 1)
-        self._sign_shift = np.uint64(self._mant_bits)
-        self._exp_shift = np.uint64(self._mant_bits + 1)
+        self._mant_mask = (1 << self._mant_bits) - 1
+        self._sign_shift = self._mant_bits
+        self._exp_shift = self._mant_bits + 1
 
     def encode(self, values: npt.ArrayLike) -> np.ndarray:
         fval = np.asarray(values, dtype=np.float64)
+
+        if _HAS_C:
+            if self.bit_width == 32:
+                return _c_ti32_encode(fval)  # type: ignore[possibly-undefined]
+            else:
+                return _c_ti40_encode(fval)  # type: ignore[possibly-undefined]
+        return self._encode_py(fval)
+
+    def _encode_py(self, fval: np.ndarray) -> np.ndarray:
         mbits = self._mant_bits
         result = np.zeros(fval.shape, dtype=np.uint64)
 
         # Zero case: e_field = 0x80 (two's complement -128)
         is_zero = fval == 0.0
-        result[is_zero] = np.uint64(0x80) << self._exp_shift
+        result[is_zero] = 0x80 << self._exp_shift
 
         nonzero = ~is_zero
         if not np.any(nonzero):
@@ -56,16 +87,16 @@ class TIFloat(Encoding):
         #   s=0: value = (1 + m_frac) * 2^e  =>  m_frac = value / 2^e - 1
         #   s=1: value = (-2 + m_frac) * 2^e  =>  m_frac = value / 2^e + 2
         scaled = vals / np.exp2(e.astype(np.float64))
-        m_frac = np.where(sign == np.uint64(0), scaled - 1.0, scaled + 2.0)
+        m_frac = np.where(sign == 0, scaled - 1.0, scaled + 2.0)
         m_val = np.clip(
-            np.round(m_frac * np.float64(1 << mbits)).astype(np.int64),
+            np.round(m_frac * float(1 << mbits)).astype(np.int64),
             0,
             (1 << mbits) - 1,
         ).astype(np.uint64)
 
         # Clamp exponent to [-127, 127] (-128 is reserved for zero)
         e = np.clip(e, -127, 127)
-        e_u = e.astype(np.uint64) & np.uint64(0xFF)
+        e_u = e.astype(np.uint64) & 0xFF
 
         result[nonzero] = (
             (e_u << self._exp_shift) | (sign << self._sign_shift) | m_val
@@ -75,11 +106,20 @@ class TIFloat(Encoding):
     def decode(self, dns: npt.ArrayLike) -> np.ndarray:
         arr = np.asarray(dns, dtype=np.uint64)
         self._validate_dns(arr)
+
+        if _HAS_C:
+            if self.bit_width == 32:
+                return _c_ti32_decode(arr.astype(np.uint32))  # type: ignore[possibly-undefined]
+            else:
+                return _c_ti40_decode(arr)  # type: ignore[possibly-undefined]
+        return self._decode_py(arr)
+
+    def _decode_py(self, arr: np.ndarray) -> np.ndarray:
         mbits = self._mant_bits
 
         # Extract fields
-        e_u = (arr >> self._exp_shift) & np.uint64(0xFF)
-        s = (arr >> self._sign_shift) & np.uint64(1)
+        e_u = (arr >> self._exp_shift) & 0xFF
+        s = (arr >> self._sign_shift) & 1
         m = arr & self._mant_mask
 
         # Two's complement exponent (8-bit signed)
@@ -87,8 +127,8 @@ class TIFloat(Encoding):
         e = np.where(e_i >= 128, e_i - 256, e_i)
 
         # value = ((-2)^s + m / 2^mbits) * 2^e
-        S = np.where(s == np.uint64(0), np.float64(1.0), np.float64(-2.0))
-        M = m.astype(np.float64) / np.float64(1 << mbits)
+        S = np.where(s == 0, 1.0, -2.0)
+        M = m.astype(np.float64) / float(1 << mbits)
         result = (S + M) * np.exp2(e.astype(np.float64))
 
         # e == -128 means zero

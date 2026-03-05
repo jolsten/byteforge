@@ -9,9 +9,16 @@ from ._registry import register
 class LinearScaled(Encoding):
     """Encodes physical values as scaled integers using a linear transfer function.
 
-    Transfer function:
+    Transfer function::
+
         encode:  DN = clamp(round((EU - offset) / scale_factor), min_dn, max_dn)
         decode:  EU = scale_factor * DN + offset
+
+    Args:
+        bit_width: Number of bits for the encoding.
+        scale_factor: Scale factor for the transfer function (must be non-zero).
+        offset: Offset for the transfer function.
+        signed: If True, use signed DN range.
     """
 
     def __init__(
@@ -44,7 +51,20 @@ class LinearScaled(Encoding):
         physical_max: float,
         signed: bool = False,
     ) -> "LinearScaled":
-        """Construct from a physical range, deriving scale_factor and offset."""
+        """Construct from a physical range, deriving scale_factor and offset.
+
+        Args:
+            bit_width: Number of bits for the encoding.
+            physical_min: Minimum physical value.
+            physical_max: Maximum physical value.
+            signed: If True, use signed DN range.
+
+        Returns:
+            A LinearScaled encoding covering the given range.
+
+        Raises:
+            ValueError: If ``physical_min >= physical_max``.
+        """
         if physical_min >= physical_max:
             raise ValueError("physical_min must be less than physical_max")
         n_steps = (1 << bit_width) - 1

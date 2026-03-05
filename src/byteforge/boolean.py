@@ -9,8 +9,11 @@ from ._registry import register
 class Boolean(Encoding):
     """Single-bit boolean encoding.
 
-    Encodes truthy/falsy values as 1/0. When *inverted* is True,
-    truthy maps to 0 and falsy maps to 1.
+    Encodes truthy/falsy values as 1/0.
+
+    Args:
+        bit_width: Must be 1.
+        inverted: When True, truthy maps to 0 and falsy maps to 1.
     """
 
     def __init__(self, bit_width: int = 1, *, inverted: bool = False) -> None:
