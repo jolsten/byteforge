@@ -1,3 +1,5 @@
+from typing import Union
+
 import numpy as np
 import numpy.typing as npt
 
@@ -12,8 +14,10 @@ class OffsetBinary(Encoding):
     Maps signed values to unsigned by adding a zero offset of 2^(N-1).
     """
 
-    def __init__(self, bit_width: int, *, errors: str = "clamp") -> None:
-        super().__init__(bit_width, errors=errors)
+    def __init__(
+        self, bit_width: int, *, encode_errors: Union[str, int, float] = "clamp"
+    ) -> None:
+        super().__init__(bit_width, encode_errors=encode_errors)
         self._zero_offset = 1 << (bit_width - 1)
         self._min_value = -(1 << (bit_width - 1))
         self._max_value = (1 << (bit_width - 1)) - 1
@@ -21,7 +25,6 @@ class OffsetBinary(Encoding):
 
     def _encode(self, values: npt.ArrayLike) -> np.ndarray:
         arr = np.asarray(values)
-        self._check_overflow(arr, self._min_value, self._max_value)
         if np.isdtype(arr.dtype, "integral"):
             clamped = np.clip(arr, self._min_value, self._max_value).astype(np.int64)
         else:
@@ -30,7 +33,8 @@ class OffsetBinary(Encoding):
                 self._min_value,
                 self._max_value,
             ).astype(np.int64)
-        return (clamped + self._zero_offset).astype(self._dn_dtype)
+        result = (clamped + self._zero_offset).astype(self._dn_dtype)
+        return self._apply_encode_overflow(arr, self._min_value, self._max_value, result)
 
     def _decode(self, dns: npt.ArrayLike) -> np.ndarray:
         arr = self._validate_dns(dns)

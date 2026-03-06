@@ -26,16 +26,16 @@ class GrayCode(Encoding):
 
     def _encode(self, values: npt.ArrayLike) -> np.ndarray:
         arr = np.asarray(values)
-        self._check_overflow(arr, 0, self.max_unsigned)
         if np.isdtype(arr.dtype, "integral"):
-            arr = np.where(arr < 0, 0, arr).astype(np.uint64)
-            n = np.clip(arr, np.uint64(0), np.uint64(self.max_unsigned))
+            clamped = np.where(arr < 0, 0, arr).astype(np.uint64)
+            n = np.clip(clamped, np.uint64(0), np.uint64(self.max_unsigned))
         else:
             upper = float(self.max_unsigned)
             if int(upper) > self.max_unsigned:
                 upper = np.nextafter(upper, 0.0)
             n = np.clip(np.round(arr.astype(np.float64)), 0, upper).astype(np.uint64)
-        return (n ^ (n >> 1)).astype(self._dn_dtype)
+        result = (n ^ (n >> 1)).astype(self._dn_dtype)
+        return self._apply_encode_overflow(arr, 0, self.max_unsigned, result)
 
     def _decode(self, dns: npt.ArrayLike) -> np.ndarray:
         arr = self._validate_dns(dns)
@@ -47,6 +47,14 @@ class GrayCode(Encoding):
         return self._decode_py(arr)
 
     def _decode_py(self, arr: np.ndarray) -> np.ndarray:
+        """Pure-Python Gray code decode via iterative XOR-shift.
+
+        Args:
+            arr: Validated uint64 array of Gray-coded bit patterns.
+
+        Returns:
+            Decoded unsigned integer values with the target DN dtype.
+        """
         n = arr.copy()
         shift = 1
         while shift < self.bit_width:

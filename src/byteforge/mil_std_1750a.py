@@ -1,4 +1,5 @@
 import os
+from typing import Union
 
 import numpy as np
 import numpy.typing as npt
@@ -43,10 +44,12 @@ class MilStd1750A(Encoding):
     Where mantissa_bits = 24 (32-bit) or 40 (48-bit).
     """
 
-    def __init__(self, bit_width: int) -> None:
+    def __init__(
+        self, bit_width: int, *, encode_errors: Union[str, int, float] = "clamp"
+    ) -> None:
         if bit_width not in _VALID_WIDTHS:
             raise ValueError(f"MilStd1750A bit_width must be 32 or 48, got {bit_width}")
-        super().__init__(bit_width)
+        super().__init__(bit_width, encode_errors=encode_errors)
         self._mantissa_bits = bit_width - 8
 
     def _pack(self, M_u: np.ndarray, E_u: np.ndarray) -> np.ndarray:
@@ -92,16 +95,26 @@ class MilStd1750A(Encoding):
 
         if _HAS_C:
             if self.bit_width == 32:
-                return _c_milstd1750a32_encode(  # type: ignore[possibly-undefined]
-                    fval
-                )
+                result = _c_milstd1750a32_encode(fval)  # type: ignore[possibly-undefined]
             else:
-                return _c_milstd1750a48_encode(  # type: ignore[possibly-undefined]
-                    fval
-                )
-        return self._encode_py(fval)
+                result = _c_milstd1750a48_encode(fval)  # type: ignore[possibly-undefined]
+        else:
+            result = self._encode_py(fval)
+        lo, hi = self.value_range
+        return self._apply_encode_overflow(fval, lo, hi, result)
 
     def _encode_py(self, fval: np.ndarray) -> np.ndarray:
+        """Pure-Python MIL-STD-1750A encode.
+
+        Extracts mantissa and exponent from float64 values, then packs them
+        into the 32-bit ``[M24|E8]`` or 48-bit ``[M_hi24|E8|M_lo16]`` format.
+
+        Args:
+            fval: Float64 array of values to encode.
+
+        Returns:
+            Unsigned integer array of encoded bit patterns.
+        """
         mbits = self._mantissa_bits
         result = np.zeros(fval.shape, dtype=np.uint64)
 
@@ -141,6 +154,17 @@ class MilStd1750A(Encoding):
         return self._decode_py(arr)
 
     def _decode_py(self, arr: np.ndarray) -> np.ndarray:
+        """Pure-Python MIL-STD-1750A decode.
+
+        Unpacks mantissa and exponent from bit patterns and reconstructs
+        float64 values using ``M * 2^(E - (mbits - 1))``.
+
+        Args:
+            arr: Validated uint64 array of MIL-STD-1750A bit patterns.
+
+        Returns:
+            Float64 array of decoded values.
+        """
         mbits = self._mantissa_bits
 
         M_u, E_u = self._unpack(arr)

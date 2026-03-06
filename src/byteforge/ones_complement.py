@@ -1,3 +1,5 @@
+from typing import Union
+
 import numpy as np
 import numpy.typing as npt
 
@@ -16,8 +18,10 @@ class OnesComplement(Encoding):
     Negative zero (all bits set) decodes to 0.
     """
 
-    def __init__(self, bit_width: int, *, errors: str = "clamp") -> None:
-        super().__init__(bit_width, errors=errors)
+    def __init__(
+        self, bit_width: int, *, encode_errors: Union[str, int, float] = "clamp"
+    ) -> None:
+        super().__init__(bit_width, encode_errors=encode_errors)
         self._mask = (1 << bit_width) - 1
         self._min_signed = -((1 << (bit_width - 1)) - 1)
         self._max_signed = (1 << (bit_width - 1)) - 1
@@ -25,7 +29,6 @@ class OnesComplement(Encoding):
 
     def _encode(self, values: npt.ArrayLike) -> np.ndarray:
         arr = np.asarray(values)
-        self._check_overflow(arr, self._min_signed, self._max_signed)
         if np.isdtype(arr.dtype, "integral"):
             clamped = np.clip(arr, self._min_signed, self._max_signed).astype(np.int64)
         else:
@@ -40,7 +43,9 @@ class OnesComplement(Encoding):
             self._mask - (-clamped).astype(np.uint64),
             clamped.astype(np.uint64),
         )
-        return result.astype(self._dn_dtype)
+        return self._apply_encode_overflow(
+            arr, self._min_signed, self._max_signed, result.astype(self._dn_dtype)
+        )
 
     def _decode(self, dns: npt.ArrayLike) -> np.ndarray:
         arr = self._validate_dns(dns)

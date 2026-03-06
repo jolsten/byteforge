@@ -12,11 +12,10 @@ class Unsigned(Encoding):
 
     def _encode(self, values: npt.ArrayLike) -> np.ndarray:
         arr = np.asarray(values)
-        self._check_overflow(arr, 0, self.max_unsigned)
         if np.isdtype(arr.dtype, "integral"):
             # Clamp negatives to 0 before uint64 cast to avoid silent wrap
-            arr = np.where(arr < 0, 0, arr).astype(np.uint64)
-            clamped = np.clip(arr, np.uint64(0), np.uint64(self.max_unsigned))
+            clamped = np.where(arr < 0, 0, arr).astype(np.uint64)
+            clamped = np.clip(clamped, np.uint64(0), np.uint64(self.max_unsigned))
         else:
             # float64 can't exactly represent large uint64 values;
             # e.g. float64(2^64-1) rounds to 2^64, overflowing uint64 on cast.
@@ -25,7 +24,7 @@ class Unsigned(Encoding):
             if int(upper) > self.max_unsigned:
                 upper = np.nextafter(upper, 0.0)
             clamped = np.clip(np.round(arr.astype(np.float64)), 0, upper).astype(np.uint64)
-        return clamped.astype(self._dn_dtype)
+        return self._apply_encode_overflow(arr, 0, self.max_unsigned, clamped.astype(self._dn_dtype))
 
     def _decode(self, dns: npt.ArrayLike) -> np.ndarray:
         arr = self._validate_dns(dns)

@@ -101,7 +101,7 @@ class TestEquality:
         assert BCD(8) == BCD(8)
 
     def test_bcd_different_errors(self):
-        assert BCD(8) != BCD(8, errors="nan")
+        assert BCD(8) != BCD(8, decode_errors="nan")
 
     def test_boolean_equal(self):
         assert Boolean() == Boolean()
@@ -136,71 +136,117 @@ class TestStr:
         assert str(BCD(8)) == "BCD(8)"
 
     def test_bcd_str_with_errors(self):
-        s = str(BCD(8, errors="nan"))
+        s = str(BCD(8, decode_errors="nan"))
         assert "nan" in s
 
 
-# -- Overflow errors="raise" ---------------------------------------------------
+# -- Overflow encode_errors="raise" --------------------------------------------
 
 
 class TestOverflowRaise:
     def test_unsigned_raise(self):
-        enc = Unsigned(8, errors="raise")
+        enc = Unsigned(8, encode_errors="raise")
         with pytest.raises(OverflowError):
             enc.encode(np.array([256]))
 
     def test_unsigned_no_raise_in_range(self):
-        enc = Unsigned(8, errors="raise")
+        enc = Unsigned(8, encode_errors="raise")
         result = enc.encode(np.array([255]))
         assert result[0] == 255
 
     def test_twos_complement_raise(self):
-        enc = TwosComplement(8, errors="raise")
+        enc = TwosComplement(8, encode_errors="raise")
         with pytest.raises(OverflowError):
             enc.encode(np.array([128]))
 
     def test_twos_complement_raise_negative(self):
-        enc = TwosComplement(8, errors="raise")
+        enc = TwosComplement(8, encode_errors="raise")
         with pytest.raises(OverflowError):
             enc.encode(np.array([-129]))
 
     def test_ones_complement_raise(self):
-        enc = OnesComplement(8, errors="raise")
+        enc = OnesComplement(8, encode_errors="raise")
         with pytest.raises(OverflowError):
             enc.encode(np.array([128]))
 
     def test_offset_binary_raise(self):
-        enc = OffsetBinary(8, errors="raise")
+        enc = OffsetBinary(8, encode_errors="raise")
         with pytest.raises(OverflowError):
             enc.encode(np.array([128]))
 
     def test_gray_code_raise(self):
-        enc = GrayCode(8, errors="raise")
+        enc = GrayCode(8, encode_errors="raise")
         with pytest.raises(OverflowError):
             enc.encode(np.array([256]))
 
     def test_linear_scaled_raise(self):
-        enc = LinearScaled(8, scale_factor=1.0, offset=0.0, errors="raise")
+        enc = LinearScaled(8, scale_factor=1.0, offset=0.0, encode_errors="raise")
         with pytest.raises(OverflowError):
             enc.encode(np.array([256.0]))
 
     def test_bcd_clamp_default(self):
-        # BCD's errors param controls decode behavior, not encode overflow.
-        # Encode overflow uses base class default ("clamp").
         enc = BCD(8)
         result = enc.encode(np.array([100]))
         # 99 is max for 2-digit BCD
         assert int(enc.decode(result)[0]) == 99
 
     def test_invalid_errors_value(self):
-        with pytest.raises(ValueError, match="errors must be"):
-            Unsigned(8, errors="ignore")
+        with pytest.raises(ValueError, match="encode_errors must be"):
+            Unsigned(8, encode_errors="ignore")
 
     def test_clamp_default(self):
         # Default is clamp, should not raise
         enc = Unsigned(8)
         result = enc.encode(np.array([300]))
         assert result[0] == 255
+
+
+# -- encode_errors="nan" and sentinel -----------------------------------------
+
+
+class TestEncodeErrorsNaN:
+    """encode_errors='nan' returns float64 with NaN for out-of-range elements."""
+
+    def test_unsigned_nan(self):
+        enc = Unsigned(8, encode_errors="nan")
+        result = enc.encode(np.array([100, 300, 0, -5]))
+        assert result.dtype == np.float64
+        assert result[0] == 100
+        assert np.isnan(result[1])
+        assert result[2] == 0
+        assert np.isnan(result[3])
+
+    def test_twos_complement_nan(self):
+        enc = TwosComplement(8, encode_errors="nan")
+        result = enc.encode(np.array([0, 200, -1, -200]))
+        assert result.dtype == np.float64
+        assert not np.isnan(result[0])
+        assert np.isnan(result[1])
+        assert not np.isnan(result[2])
+        assert np.isnan(result[3])
+
+    def test_all_in_range_keeps_dtype(self):
+        enc = Unsigned(8, encode_errors="nan")
+        result = enc.encode(np.array([0, 128, 255]))
+        # All in range — no NaN needed, should still be uint8
+        assert result.dtype == np.uint8
+
+
+class TestEncodeErrorsSentinel:
+    """encode_errors=<numeric> substitutes sentinel for out-of-range elements."""
+
+    def test_unsigned_sentinel(self):
+        enc = Unsigned(8, encode_errors=0)
+        result = enc.encode(np.array([100, 300, 0]))
+        assert result.dtype == np.uint8
+        assert result[0] == 100
+        assert result[1] == 0  # sentinel
+        assert result[2] == 0
+
+    def test_gray_code_sentinel(self):
+        enc = GrayCode(8, encode_errors=255)
+        result = enc.encode(np.array([10, 300]))
+        assert result[1] == 255
 
 
 # -- from_range() classmethods -------------------------------------------------
@@ -241,7 +287,7 @@ class TestFromRange:
         assert enc.bit_width == 12  # 3 digits * 4 bits
 
     def test_bcd_from_range_with_kwargs(self):
-        enc = BCD.from_range(max_value=99, errors="nan")
+        enc = BCD.from_range(max_value=99, decode_errors="nan")
         assert enc._decode_errors == "nan"
 
     def test_bcd_from_range_negative(self):

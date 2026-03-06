@@ -1,4 +1,5 @@
 import os
+from typing import Union
 
 import numpy as np
 import numpy.typing as npt
@@ -50,10 +51,12 @@ class DECFloat(Encoding):
     Reference: https://pubs.usgs.gov/of/2005/1424/
     """
 
-    def __init__(self, bit_width: int) -> None:
+    def __init__(
+        self, bit_width: int, *, encode_errors: Union[str, int, float] = "clamp"
+    ) -> None:
         if bit_width not in _DEC_VALID_WIDTHS:
             raise ValueError(f"DECFloat bit_width must be 32 or 64, got {bit_width}")
-        super().__init__(bit_width)
+        super().__init__(bit_width, encode_errors=encode_errors)
         self._exp_bits = 8
         self._bias = 128
         self._mant_bits = bit_width - 1 - self._exp_bits  # 23 or 55
@@ -70,14 +73,28 @@ class DECFloat(Encoding):
 
         if _HAS_C:
             if self.bit_width == 32:
-                return _c_dec32_encode(fval)  # type: ignore[possibly-undefined]
+                result = _c_dec32_encode(fval)  # type: ignore[possibly-undefined]
             elif self._exp_bits == 11:
-                return _c_dec64g_encode(fval)  # type: ignore[possibly-undefined]
+                result = _c_dec64g_encode(fval)  # type: ignore[possibly-undefined]
             else:
-                return _c_dec64_encode(fval)  # type: ignore[possibly-undefined]
-        return self._encode_py(fval)
+                result = _c_dec64_encode(fval)  # type: ignore[possibly-undefined]
+        else:
+            result = self._encode_py(fval)
+        lo, hi = self.value_range
+        return self._apply_encode_overflow(fval, lo, hi, result)
 
     def _encode_py(self, fval: np.ndarray) -> np.ndarray:
+        """Pure-Python DEC float encode.
+
+        Computes biased exponent and mantissa with hidden bit at 0.5, then
+        packs into the ``[S1|E8/11|M]`` bit layout.
+
+        Args:
+            fval: Float64 array of values to encode.
+
+        Returns:
+            Unsigned integer array of encoded bit patterns.
+        """
         result = np.zeros(fval.shape, dtype=np.uint64)
 
         nonzero = fval != 0.0
@@ -129,6 +146,17 @@ class DECFloat(Encoding):
         return self._decode_py(arr)
 
     def _decode_py(self, arr: np.ndarray) -> np.ndarray:
+        """Pure-Python DEC float decode.
+
+        Extracts sign, biased exponent, and mantissa from bit patterns and
+        reconstructs float64 values via ``(-1)^s * (0.5 + m_frac) * 2^(e-bias)``.
+
+        Args:
+            arr: Validated uint64 array of DEC float bit patterns.
+
+        Returns:
+            Float64 array of decoded values.
+        """
         s = (arr >> self._sign_shift) & 1
         e = (arr >> self._exp_shift) & self._exp_mask
         m = arr & self._mant_mask
@@ -169,10 +197,12 @@ class DECFloatG(DECFloat):
     Same decode formula as DECFloat but with 11-bit exponent and bias of 1024.
     """
 
-    def __init__(self, bit_width: int = 64) -> None:
+    def __init__(
+        self, bit_width: int = 64, *, encode_errors: Union[str, int, float] = "clamp"
+    ) -> None:
         if bit_width != 64:
             raise ValueError(f"DECFloatG bit_width must be 64, got {bit_width}")
-        Encoding.__init__(self, bit_width)
+        Encoding.__init__(self, bit_width, encode_errors=encode_errors)
         self._exp_bits = 11
         self._bias = 1024
         self._mant_bits = 52

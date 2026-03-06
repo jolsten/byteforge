@@ -1,6 +1,6 @@
 [project]
 name = "byteforge"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Encode and decode numbers as unsigned integer bit patterns"
 readme = "README.md"
 authors = [
@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [build-system]
-requires = ["setuptools>=64", "numpy>=2.0"]
+requires = ["setuptools>=64", "setuptools-scm>=8", "numpy>=2.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
@@ -23,12 +23,18 @@ dev = [
     "hypothesis>=6.141",
     "mypy>=1.19.1",
     "pytest>=8.4",
+    "pytest-benchmark>=5.2.3",
     "ruff>=0.15.4",
     "setuptools>=64",
+    "setuptools-scm>=8",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--benchmark-disable"
+
+[tool.setuptools_scm]
+version_file = "src/byteforge/_version.py"
 
 [tool.ruff]
 target-version = "py39"

@@ -52,24 +52,36 @@ class Encoding(ABC):
 
     Args:
         bit_width: Number of bits for the encoding (1-64).
-        errors: Overflow behavior for ``encode()``:
+        encode_errors: Overflow behavior for ``encode()``:
 
             - ``"clamp"`` (default): silently clamp to the representable range
             - ``"raise"``: raise ``OverflowError`` if any value is out of range
+            - ``"nan"``: return ``float64`` with ``np.nan`` for out-of-range elements
+            - numeric value: substitute this sentinel for out-of-range elements
 
     Attributes:
         bit_width: Number of bits for the encoding.
         max_unsigned: Maximum unsigned value (``2^bit_width - 1``).
     """
 
-    def __init__(self, bit_width: int, *, errors: str = "clamp") -> None:
-        if errors not in ("clamp", "raise"):
-            raise ValueError(f"errors must be 'clamp' or 'raise', got {errors!r}")
+    def __init__(
+        self, bit_width: int, *, encode_errors: Union[str, int, float] = "clamp"
+    ) -> None:
+        if isinstance(encode_errors, str) and encode_errors not in ("clamp", "raise", "nan"):
+            raise ValueError(
+                f"encode_errors must be 'clamp', 'raise', 'nan', or a numeric value, "
+                f"got {encode_errors!r}"
+            )
+        if not isinstance(encode_errors, (str, int, float)):
+            raise TypeError(
+                f"encode_errors must be str, int, or float, "
+                f"got {type(encode_errors).__name__}"
+            )
         validate_bit_width(bit_width)
         self.bit_width: int = bit_width
         self.max_unsigned: int = (1 << bit_width) - 1
         self._dn_dtype: type[np.unsignedinteger] = _min_uint_dtype(bit_width)
-        self._errors: str = errors
+        self._encode_errors: Union[str, int, float] = encode_errors
 
     def encode(self, values: npt.ArrayLike) -> np.ndarray:
         """Encode physical values to unsigned integer bit patterns.
@@ -155,27 +167,52 @@ class Encoding(ABC):
             )
         return arr
 
-    def _check_overflow(
+    def _apply_encode_overflow(
         self,
         values: np.ndarray,
         lo: Union[float, int],
         hi: Union[float, int],
-    ) -> None:
-        """Raise OverflowError if values are outside [lo, hi] and errors='raise'.
+        result: np.ndarray,
+    ) -> np.ndarray:
+        """Apply the encode overflow policy to the encoded result.
+
+        Called after the encoding transform with both the original values
+        (pre-clamp) and the encoded result (post-clamp). For ``"clamp"``
+        mode the result is returned unchanged. Other modes substitute or
+        raise based on out-of-bound elements.
 
         Args:
-            values: Values to check.
-            lo: Lower bound (inclusive).
-            hi: Upper bound (inclusive).
+            values: Original input values (before clamping).
+            lo: Lower bound of representable range (inclusive).
+            hi: Upper bound of representable range (inclusive).
+            result: The already-encoded DN array (post-clamp).
+
+        Returns:
+            The result array, potentially modified for nan/sentinel modes.
 
         Raises:
-            OverflowError: If ``self._errors == 'raise'`` and any value is
-                outside the range.
+            OverflowError: If ``encode_errors='raise'`` and any value is
+                out of range.
         """
-        if self._errors == "raise" and (np.any(values < lo) or np.any(values > hi)):
+        if self._encode_errors == "clamp":
+            return result
+
+        oob = (values < lo) | (values > hi)
+        if not np.any(oob):
+            return result
+
+        if self._encode_errors == "raise":
             raise OverflowError(
                 f"Value(s) outside representable range [{lo}, {hi}] for {self!r}"
             )
+        if self._encode_errors == "nan":
+            out = result.astype(np.float64)
+            out[oob] = np.nan
+            return out
+        # Numeric sentinel
+        out = result.copy()
+        out[oob] = self._dn_dtype(self._encode_errors)
+        return out
 
     def to_bytes(self, dns: npt.ArrayLike, byteorder: str = "big") -> np.ndarray:
         """Convert encoded DNs to raw bytes.
@@ -229,7 +266,7 @@ class Encoding(ABC):
         b = raw_arr if byteorder == "big" else raw_arr[..., ::-1]
         result = np.zeros(raw_arr.shape[:-1], dtype=np.uint64)
         for i in range(n_bytes):
-            result |= b[..., i].astype(np.uint64) << (8 * (n_bytes - 1 - i))
+            result |= b[..., i].astype(np.uint64) << np.uint64(8 * (n_bytes - 1 - i))
         return result.astype(self._dn_dtype)
 
     @property

@@ -1,3 +1,5 @@
+from typing import Union
+
 import numpy as np
 import numpy.typing as npt
 
@@ -28,9 +30,9 @@ class LinearScaled(Encoding):
         scale_factor: float,
         offset: float = 0.0,
         signed: bool = False,
-        errors: str = "clamp",
+        encode_errors: Union[str, int, float] = "clamp",
     ) -> None:
-        super().__init__(bit_width, errors=errors)
+        super().__init__(bit_width, encode_errors=encode_errors)
         if scale_factor == 0:
             raise ValueError("scale_factor must be non-zero")
         self._scale_factor = float(scale_factor)
@@ -77,12 +79,11 @@ class LinearScaled(Encoding):
     def _encode(self, values: npt.ArrayLike) -> np.ndarray:
         arr = np.asarray(values, dtype=np.float64)
         lo, hi = self.value_range
-        self._check_overflow(arr, lo, hi)
         dns = np.round((arr - self._offset) / self._scale_factor)
         dns = np.clip(dns, self._min_dn, self._max_dn).astype(np.int64)
         if self._signed:
             dns = np.where(dns < 0, dns + (1 << self.bit_width), dns)
-        return dns.astype(self._dn_dtype)
+        return self._apply_encode_overflow(arr, lo, hi, dns.astype(self._dn_dtype))
 
     def _decode(self, dns: npt.ArrayLike) -> np.ndarray:
         arr = self._validate_dns(dns)

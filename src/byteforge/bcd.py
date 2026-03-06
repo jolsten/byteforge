@@ -27,36 +27,49 @@ class BCD(Encoding):
 
     Args:
         bit_width: Number of bits (must be a multiple of 4, range 4-64).
-        errors: How to handle invalid BCD nibbles (>=10) during decode:
+        encode_errors: Overflow behavior for ``encode()`` (see base class).
+        decode_errors: How to handle invalid BCD nibbles (>=10) during decode:
 
             - ``"raise"`` (default): raise ``ValueError``
             - ``"nan"``: return ``float64`` with ``np.nan`` for invalid elements
             - numeric value: substitute this sentinel for invalid elements
     """
 
-    def __init__(self, bit_width: int, *, errors: Union[str, int, float] = "raise") -> None:
+    def __init__(
+        self,
+        bit_width: int,
+        *,
+        encode_errors: Union[str, int, float] = "clamp",
+        decode_errors: Union[str, int, float] = "raise",
+    ) -> None:
         if bit_width % 4 != 0:
             raise ValueError(f"BCD bit_width must be a multiple of 4, got {bit_width}")
         if not 4 <= bit_width <= 64:
             raise ValueError(f"BCD bit_width must be 4-64, got {bit_width}")
-        if isinstance(errors, str) and errors not in ("raise", "nan"):
-            raise ValueError(f"errors must be 'raise', 'nan', or a numeric value, got {errors!r}")
-        if not isinstance(errors, (str, int, float)):
-            raise TypeError(f"errors must be str, int, or float, got {type(errors).__name__}")
-        super().__init__(bit_width)
-        if isinstance(errors, (int, float)) and not isinstance(errors, bool):
+        if isinstance(decode_errors, str) and decode_errors not in ("raise", "nan"):
+            raise ValueError(
+                f"decode_errors must be 'raise', 'nan', or a numeric value, "
+                f"got {decode_errors!r}"
+            )
+        if not isinstance(decode_errors, (str, int, float)):
+            raise TypeError(
+                f"decode_errors must be str, int, or float, "
+                f"got {type(decode_errors).__name__}"
+            )
+        super().__init__(bit_width, encode_errors=encode_errors)
+        if isinstance(decode_errors, (int, float)) and not isinstance(decode_errors, bool):
             max_val = np.iinfo(self._dn_dtype).max
-            if int(errors) < 0 or int(errors) > max_val:
+            if int(decode_errors) < 0 or int(decode_errors) > max_val:
                 raise ValueError(
-                    f"Sentinel value {errors} does not fit in output dtype "
+                    f"Sentinel value {decode_errors} does not fit in output dtype "
                     f"{self._dn_dtype.__name__} (max {max_val})"
                 )
         self._max_digits = bit_width // 4
         self._max_bcd_value = 10**self._max_digits - 1
-        self._decode_errors = errors
+        self._decode_errors = decode_errors
 
     def _encode(self, values: npt.ArrayLike) -> np.ndarray:
-        self._check_overflow(np.asarray(values), 0, self._max_bcd_value)
+        orig = np.asarray(values)
         arr = np.clip(
             np.round(np.asarray(values, dtype=np.float64)),
             0,
@@ -64,15 +77,25 @@ class BCD(Encoding):
         ).astype(np.uint64)
 
         if _HAS_C:
-            return _c_bcd_encode(arr, np.uint8(self._max_digits)).astype(self._dn_dtype)  # type: ignore[possibly-undefined]
-        return self._encode_py(arr)
+            result = _c_bcd_encode(arr, np.uint8(self._max_digits)).astype(self._dn_dtype)  # type: ignore[possibly-undefined]
+        else:
+            result = self._encode_py(arr)
+        return self._apply_encode_overflow(orig, 0, self._max_bcd_value, result)
 
     def _encode_py(self, arr: np.ndarray) -> np.ndarray:
+        """Pure-Python BCD encode: extract decimal digits into 4-bit nibbles.
+
+        Args:
+            arr: Clamped uint64 array of decimal values.
+
+        Returns:
+            BCD-encoded bit patterns with the target DN dtype.
+        """
         result = np.zeros_like(arr, dtype=np.uint64)
         remaining = arr.copy()
         for i in range(self._max_digits):
             digit = remaining % 10
-            result |= digit << (i * 4)
+            result |= digit.astype(np.uint64) << np.uint64(i * 4)
             remaining //= 10
         return result.astype(self._dn_dtype)
 
@@ -108,6 +131,16 @@ class BCD(Encoding):
         return raw.astype(self._dn_dtype)
 
     def _decode_py(self, arr: np.ndarray) -> np.ndarray:
+        """Pure-Python BCD decode: reconstruct decimal values from 4-bit nibbles.
+
+        Invalid nibbles (>=10) are handled according to ``self._decode_errors``.
+
+        Args:
+            arr: Validated uint64 array of BCD bit patterns.
+
+        Returns:
+            Decoded decimal values. Dtype depends on the decode_errors mode.
+        """
         result = np.zeros_like(arr, dtype=np.uint64)
         invalid = np.zeros(arr.shape, dtype=bool)
         multiplier = 1
@@ -121,7 +154,7 @@ class BCD(Encoding):
                         f"Invalid BCD nibble {nibble[bad_idx]} at position {i} in DN {arr[bad_idx]}"
                     )
                 invalid |= bad
-            result += nibble * multiplier
+            result += (nibble * np.uint64(multiplier)).astype(np.uint64)
             multiplier *= 10
 
         if self._decode_errors == "nan":
@@ -144,7 +177,7 @@ class BCD(Encoding):
 
         Args:
             max_value: The largest value to encode.
-            **kwargs: Forwarded to the constructor (e.g. ``errors``).
+            **kwargs: Forwarded to the constructor (e.g. ``decode_errors``).
 
         Returns:
             A BCD encoding with the minimum required bit width.
@@ -158,9 +191,13 @@ class BCD(Encoding):
         return cls(n_digits * 4, **kwargs)  # type: ignore[arg-type]
 
     def __repr__(self) -> str:
-        extras = f", errors={self._decode_errors!r}" if self._decode_errors != "raise" else ""
+        extras = ""
+        if self._decode_errors != "raise":
+            extras += f", decode_errors={self._decode_errors!r}"
         return f"BCD(bit_width={self.bit_width}, max_digits={self._max_digits}{extras})"
 
     def __str__(self) -> str:
-        extras = f", errors={self._decode_errors!r}" if self._decode_errors != "raise" else ""
+        extras = ""
+        if self._decode_errors != "raise":
+            extras += f", decode_errors={self._decode_errors!r}"
         return f"BCD({self.bit_width}{extras})"

@@ -37,7 +37,7 @@ class IEEE754(Encoding):
 
     @property
     def value_range(self) -> tuple[float, float]:
-        info = np.finfo(self._float_dtype)
+        info: np.finfo = np.finfo(self._float_dtype)  # type: ignore[type-arg,arg-type]
         return (float(info.min), float(info.max))
 
     def __repr__(self) -> str:

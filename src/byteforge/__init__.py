@@ -1,3 +1,9 @@
+try:
+    from ._version import __version__, __version_tuple__
+except ImportError:
+    __version__ = "0.0.0"
+    __version_tuple__ = (0, 0, 0)
+
 from ._base import Encoding
 from ._registry import create_encoding, register
 from .bcd import BCD
@@ -15,6 +21,7 @@ from .twos_complement import TwosComplement
 from .unsigned import Unsigned
 
 __all__ = [
+    "__version__",
     "Encoding",
     "register",
     "create_encoding",

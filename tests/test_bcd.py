@@ -115,22 +115,22 @@ class TestBCDDecode:
 
 
 class TestBCDErrorsNaN:
-    """errors='nan' returns float64 with NaN for invalid elements."""
+    """decode_errors='nan' returns float64 with NaN for invalid elements."""
 
     def test_single_invalid_returns_nan(self):
-        bcd = BCD(8, errors="nan")
+        bcd = BCD(8, decode_errors="nan")
         result = bcd.decode(np.array([0xA5], dtype=np.uint64))
         assert result.dtype == np.float64
         assert np.isnan(result[0])
 
     def test_single_valid_returns_value(self):
-        bcd = BCD(8, errors="nan")
+        bcd = BCD(8, decode_errors="nan")
         result = bcd.decode(np.array([0x42], dtype=np.uint64))
         assert result.dtype == np.float64
         assert result[0] == 42.0
 
     def test_mixed_valid_invalid(self):
-        bcd = BCD(8, errors="nan")
+        bcd = BCD(8, decode_errors="nan")
         result = bcd.decode(np.array([0x12, 0xFF, 0x03, 0xAB], dtype=np.uint64))
         assert result.dtype == np.float64
         assert result[0] == 12.0
@@ -139,45 +139,45 @@ class TestBCDErrorsNaN:
         assert np.isnan(result[3])
 
     def test_all_valid_stays_float(self):
-        bcd = BCD(8, errors="nan")
+        bcd = BCD(8, decode_errors="nan")
         result = bcd.decode(np.array([0x00, 0x99], dtype=np.uint64))
         assert result.dtype == np.float64
         assert list(result) == [0.0, 99.0]
 
     @pytest.mark.parametrize("bit_width, dn", INVALID_DECODE_VECTORS)
     def test_all_invalid_vectors_return_nan(self, bit_width: int, dn: int):
-        bcd = BCD(bit_width, errors="nan")
+        bcd = BCD(bit_width, decode_errors="nan")
         result = bcd.decode(np.array([dn], dtype=np.uint64))
         assert np.isnan(result[0])
 
 
 class TestBCDErrorsSentinel:
-    """errors=<numeric> substitutes sentinel for invalid elements."""
+    """decode_errors=<numeric> substitutes sentinel for invalid elements."""
 
     def test_single_invalid_returns_sentinel(self):
-        bcd = BCD(8, errors=255)
+        bcd = BCD(8, decode_errors=255)
         result = bcd.decode(np.array([0xA5], dtype=np.uint64))
         assert result.dtype == np.uint8
         assert result[0] == 255
 
     def test_single_valid_returns_value(self):
-        bcd = BCD(8, errors=255)
+        bcd = BCD(8, decode_errors=255)
         result = bcd.decode(np.array([0x42], dtype=np.uint64))
         assert result[0] == 42
 
     def test_mixed_valid_invalid(self):
-        bcd = BCD(8, errors=255)
+        bcd = BCD(8, decode_errors=255)
         result = bcd.decode(np.array([0x12, 0xFF, 0x03, 0xAB], dtype=np.uint64))
         assert result.dtype == np.uint8
         assert list(result) == [12, 255, 3, 255]
 
     def test_zero_sentinel(self):
-        bcd = BCD(8, errors=0)
+        bcd = BCD(8, decode_errors=0)
         result = bcd.decode(np.array([0xFF], dtype=np.uint64))
         assert result[0] == 0
 
     def test_16bit_sentinel(self):
-        bcd = BCD(16, errors=9999)
+        bcd = BCD(16, decode_errors=9999)
         result = bcd.decode(np.array([0xAAAA], dtype=np.uint64))
         assert result.dtype == np.uint16
         assert result[0] == 9999
@@ -185,7 +185,7 @@ class TestBCDErrorsSentinel:
     @pytest.mark.parametrize("bit_width, dn", INVALID_DECODE_VECTORS)
     def test_all_invalid_vectors_return_sentinel(self, bit_width: int, dn: int):
         sentinel = 200 if bit_width <= 8 else 12345
-        bcd = BCD(bit_width, errors=sentinel)
+        bcd = BCD(bit_width, decode_errors=sentinel)
         result = bcd.decode(np.array([dn], dtype=np.uint64))
         assert result[0] == sentinel
 
@@ -197,27 +197,27 @@ class TestBCDErrorsValidation:
     def test_valid_same_as_raise(self, bit_width: int, dn: int, expected: int):
         sentinel = 200 if bit_width <= 8 else 9999
         for errors in ("raise", "nan", sentinel):
-            result = BCD(bit_width, errors=errors).decode(
+            result = BCD(bit_width, decode_errors=errors).decode(
                 np.array([dn], dtype=np.uint64)
             )
             assert int(result[0]) == expected
 
     def test_invalid_errors_string(self):
-        with pytest.raises(ValueError, match="errors must be"):
-            BCD(8, errors="ignore")
+        with pytest.raises(ValueError, match="decode_errors must be"):
+            BCD(8, decode_errors="ignore")
 
     def test_sentinel_overflow_rejected(self):
         with pytest.raises(ValueError, match="does not fit"):
-            BCD(8, errors=9999)
+            BCD(8, decode_errors=9999)
 
     def test_negative_sentinel_rejected(self):
         with pytest.raises(ValueError, match="does not fit"):
-            BCD(8, errors=-1)
+            BCD(8, decode_errors=-1)
 
     def test_repr_with_errors(self):
-        assert "errors='nan'" in repr(BCD(8, errors="nan"))
-        assert "errors=42" in repr(BCD(8, errors=42))
-        assert "errors" not in repr(BCD(8))
+        assert "decode_errors='nan'" in repr(BCD(8, decode_errors="nan"))
+        assert "decode_errors=42" in repr(BCD(8, decode_errors=42))
+        assert "decode_errors" not in repr(BCD(8))
 
 
 class TestBCDMisc:

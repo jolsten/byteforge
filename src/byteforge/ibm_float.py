@@ -1,4 +1,5 @@
 import os
+from typing import Union
 
 import numpy as np
 import numpy.typing as npt
@@ -44,10 +45,12 @@ class IBMFloat(Encoding):
     Reference: https://en.wikipedia.org/wiki/IBM_hexadecimal_floating-point
     """
 
-    def __init__(self, bit_width: int) -> None:
+    def __init__(
+        self, bit_width: int, *, encode_errors: Union[str, int, float] = "clamp"
+    ) -> None:
         if bit_width not in _VALID_WIDTHS:
             raise ValueError(f"IBMFloat bit_width must be 32 or 64, got {bit_width}")
-        super().__init__(bit_width)
+        super().__init__(bit_width, encode_errors=encode_errors)
         self._mant_bits = bit_width - 8  # 24 for IBM32, 56 for IBM64
         self._mant_mask = (1 << self._mant_bits) - 1
         self._exp_shift = self._mant_bits
@@ -57,13 +60,28 @@ class IBMFloat(Encoding):
         fval = np.asarray(values, dtype=np.float64)
 
         if _HAS_C:
-            if self.bit_width == 32:
-                return _c_ibm32_encode(fval)  # type: ignore[possibly-undefined]
-            else:
-                return _c_ibm64_encode(fval)  # type: ignore[possibly-undefined]
-        return self._encode_py(fval)
+            result = (
+                _c_ibm32_encode(fval)  # type: ignore[possibly-undefined]
+                if self.bit_width == 32
+                else _c_ibm64_encode(fval)  # type: ignore[possibly-undefined]
+            )
+        else:
+            result = self._encode_py(fval)
+        lo, hi = self.value_range
+        return self._apply_encode_overflow(fval, lo, hi, result)
 
     def _encode_py(self, fval: np.ndarray) -> np.ndarray:
+        """Pure-Python IBM hex-float encode.
+
+        Computes base-16 exponent and normalized mantissa fraction, then
+        packs into the ``[S1|E7|M24/56]`` bit layout.
+
+        Args:
+            fval: Float64 array of values to encode.
+
+        Returns:
+            Unsigned integer array of encoded bit patterns.
+        """
         mbits = self._mant_bits
         result = np.zeros(fval.shape, dtype=np.uint64)
 
@@ -114,6 +132,17 @@ class IBMFloat(Encoding):
         return self._decode_py(arr)
 
     def _decode_py(self, arr: np.ndarray) -> np.ndarray:
+        """Pure-Python IBM hex-float decode.
+
+        Extracts sign, base-16 exponent, and mantissa from the ``[S1|E7|M]``
+        layout and reconstructs float64 values.
+
+        Args:
+            arr: Validated uint64 array of IBM float bit patterns.
+
+        Returns:
+            Float64 array of decoded values.
+        """
         mbits = self._mant_bits
 
         s = (arr >> self._sign_shift) & 1

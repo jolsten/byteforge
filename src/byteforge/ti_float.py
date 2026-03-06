@@ -1,4 +1,5 @@
 import os
+from typing import Union
 
 import numpy as np
 import numpy.typing as npt
@@ -45,10 +46,12 @@ class TIFloat(Encoding):
     Reference: https://www.ti.com/lit/an/spra400/spra400.pdf
     """
 
-    def __init__(self, bit_width: int) -> None:
+    def __init__(
+        self, bit_width: int, *, encode_errors: Union[str, int, float] = "clamp"
+    ) -> None:
         if bit_width not in _VALID_WIDTHS:
             raise ValueError(f"TIFloat bit_width must be 32 or 40, got {bit_width}")
-        super().__init__(bit_width)
+        super().__init__(bit_width, encode_errors=encode_errors)
         self._mant_bits = bit_width - 9  # 23 for TI32, 31 for TI40
         self._mant_mask = (1 << self._mant_bits) - 1
         self._sign_shift = self._mant_bits
@@ -58,13 +61,28 @@ class TIFloat(Encoding):
         fval = np.asarray(values, dtype=np.float64)
 
         if _HAS_C:
-            if self.bit_width == 32:
-                return _c_ti32_encode(fval)  # type: ignore[possibly-undefined]
-            else:
-                return _c_ti40_encode(fval)  # type: ignore[possibly-undefined]
-        return self._encode_py(fval)
+            result = (
+                _c_ti32_encode(fval)  # type: ignore[possibly-undefined]
+                if self.bit_width == 32
+                else _c_ti40_encode(fval)  # type: ignore[possibly-undefined]
+            )
+        else:
+            result = self._encode_py(fval)
+        lo, hi = self.value_range
+        return self._apply_encode_overflow(fval, lo, hi, result)
 
     def _encode_py(self, fval: np.ndarray) -> np.ndarray:
+        """Pure-Python TI float encode.
+
+        Computes exponent, sign, and mantissa fraction, then packs into
+        the ``[E8|S1|M23/31]`` bit layout.
+
+        Args:
+            fval: Float64 array of values to encode.
+
+        Returns:
+            Unsigned integer array of encoded bit patterns.
+        """
         mbits = self._mant_bits
         result = np.zeros(fval.shape, dtype=np.uint64)
 
@@ -114,6 +132,17 @@ class TIFloat(Encoding):
         return self._decode_py(arr)
 
     def _decode_py(self, arr: np.ndarray) -> np.ndarray:
+        """Pure-Python TI float decode.
+
+        Extracts exponent, sign, and mantissa from the ``[E8|S1|M]`` layout
+        and reconstructs float64 values via ``((-2)^s + m/2^mbits) * 2^e``.
+
+        Args:
+            arr: Validated uint64 array of TI float bit patterns.
+
+        Returns:
+            Float64 array of decoded values.
+        """
         mbits = self._mant_bits
 
         # Extract fields
