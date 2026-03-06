@@ -28,7 +28,8 @@ class GrayCode(Encoding):
         arr = np.asarray(values)
         self._check_overflow(arr, 0, self.max_unsigned)
         if np.isdtype(arr.dtype, "integral"):
-            n = np.clip(arr, 0, self.max_unsigned).astype(np.uint64)
+            arr = np.where(arr < 0, 0, arr).astype(np.uint64)
+            n = np.clip(arr, np.uint64(0), np.uint64(self.max_unsigned))
         else:
             upper = float(self.max_unsigned)
             if int(upper) > self.max_unsigned:

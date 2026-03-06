@@ -14,7 +14,9 @@ class Unsigned(Encoding):
         arr = np.asarray(values)
         self._check_overflow(arr, 0, self.max_unsigned)
         if np.isdtype(arr.dtype, "integral"):
-            clamped = np.clip(arr, 0, self.max_unsigned).astype(np.uint64)
+            # Clamp negatives to 0 before uint64 cast to avoid silent wrap
+            arr = np.where(arr < 0, 0, arr).astype(np.uint64)
+            clamped = np.clip(arr, np.uint64(0), np.uint64(self.max_unsigned))
         else:
             # float64 can't exactly represent large uint64 values;
             # e.g. float64(2^64-1) rounds to 2^64, overflowing uint64 on cast.
