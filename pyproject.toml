@@ -57,5 +57,6 @@ ignore_missing_imports = true
 
 [tool.cibuildwheel]
 build = "cp39-* cp310-* cp311-* cp312-* cp313-*"
+skip = "*-win32 *-manylinux_i686"
 test-requires = ["pytest", "hypothesis"]
 test-command = "pytest {project}/tests/"
