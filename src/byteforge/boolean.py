@@ -22,15 +22,14 @@ class Boolean(Encoding):
         super().__init__(bit_width)
         self.inverted = inverted
 
-    def encode(self, values: npt.ArrayLike) -> np.ndarray:
+    def _encode(self, values: npt.ArrayLike) -> np.ndarray:
         arr = np.asarray(values).astype(bool).astype(np.uint8)
         if self.inverted:
             arr = np.uint8(1) - arr
         return arr
 
-    def decode(self, dns: npt.ArrayLike) -> np.ndarray:
-        arr = np.asarray(dns, dtype=np.uint64)
-        self._validate_dns(arr)
+    def _decode(self, dns: npt.ArrayLike) -> np.ndarray:
+        arr = self._validate_dns(dns)
         result = arr.astype(bool).astype(np.uint8)
         if self.inverted:
             result = np.uint8(1) - result
@@ -42,3 +41,6 @@ class Boolean(Encoding):
 
     def __repr__(self) -> str:
         return f"Boolean(inverted={self.inverted})"
+
+    def __str__(self) -> str:
+        return "Boolean(inverted)" if self.inverted else "Boolean"

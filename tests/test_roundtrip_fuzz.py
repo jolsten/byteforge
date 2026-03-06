@@ -2,7 +2,7 @@
 
 import numpy as np
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import given, settings
 from hypothesis.strategies import booleans, composite, floats, integers, sampled_from
 
 from byteforge import (
@@ -22,7 +22,7 @@ from byteforge import (
     Unsigned,
 )
 
-_FUZZ_SETTINGS = settings(max_examples=200, suppress_health_check=[HealthCheck.too_slow])
+_FUZZ_SETTINGS = settings(max_examples=200)
 
 # Cap integer bit widths at 53 -- encode() converts via float64, losing
 # precision beyond 2^53.

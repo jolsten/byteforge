@@ -22,6 +22,12 @@ def register(name: str, *, bit_width: Optional[int] = None) -> Callable[[type], 
     """
 
     def decorator(cls: type) -> type:
+        if name in _ENCODING_REGISTRY:
+            existing_cls, _ = _ENCODING_REGISTRY[name]
+            raise ValueError(
+                f"Encoding name {name!r} is already registered to "
+                f"{existing_cls.__name__}"
+            )
         _ENCODING_REGISTRY[name] = (cls, bit_width)
         return cls
 

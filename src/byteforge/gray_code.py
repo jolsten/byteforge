@@ -24,8 +24,9 @@ class GrayCode(Encoding):
     Adjacent values differ by exactly one bit.
     """
 
-    def encode(self, values: npt.ArrayLike) -> np.ndarray:
+    def _encode(self, values: npt.ArrayLike) -> np.ndarray:
         arr = np.asarray(values)
+        self._check_overflow(arr, 0, self.max_unsigned)
         if np.isdtype(arr.dtype, "integral"):
             n = np.clip(arr, 0, self.max_unsigned).astype(np.uint64)
         else:
@@ -35,9 +36,8 @@ class GrayCode(Encoding):
             n = np.clip(np.round(arr.astype(np.float64)), 0, upper).astype(np.uint64)
         return (n ^ (n >> 1)).astype(self._dn_dtype)
 
-    def decode(self, dns: npt.ArrayLike) -> np.ndarray:
-        arr = np.asarray(dns, dtype=np.uint64)
-        self._validate_dns(arr)
+    def _decode(self, dns: npt.ArrayLike) -> np.ndarray:
+        arr = self._validate_dns(dns)
 
         if _HAS_C:
             return _c_gray_decode(  # type: ignore[possibly-undefined]
@@ -56,6 +56,24 @@ class GrayCode(Encoding):
     @property
     def value_range(self) -> tuple[int, int]:
         return (0, self.max_unsigned)
+
+    @classmethod
+    def from_range(cls, *, max_value: int) -> "GrayCode":
+        """Construct from the maximum value that needs to be represented.
+
+        Args:
+            max_value: The largest value to encode.
+
+        Returns:
+            A GrayCode encoding with the minimum required bit width.
+
+        Raises:
+            ValueError: If ``max_value`` is negative.
+        """
+        if max_value < 0:
+            raise ValueError(f"max_value must be >= 0, got {max_value}")
+        bit_width = max(1, max_value.bit_length())
+        return cls(bit_width)
 
     def __repr__(self) -> str:
         return f"GrayCode(bit_width={self.bit_width})"

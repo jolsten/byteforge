@@ -2,6 +2,8 @@
 
 Encode and decode numbers as unsigned integer bit patterns using NumPy arrays.
 
+Requires Python >= 3.9 and NumPy >= 2.0.
+
 ## Installation
 
 ```
@@ -53,6 +55,9 @@ raw = enc.to_bytes(dns, byteorder="big")    # uint8 array, shape (2, 2)
 enc.decode(enc.from_bytes(raw, byteorder="big"))  # roundtrip
 ```
 
+For non-byte-aligned widths (e.g. 12-bit), values are zero-padded in the most
+significant bits to fill whole bytes (2 bytes for 12-bit).
+
 ## Encodings
 
 | Encoding | Registry names | Bit widths |
@@ -71,6 +76,16 @@ enc.decode(enc.from_bytes(raw, byteorder="big"))  # roundtrip
 | `IBMFloat` | `ibm_float`, `ibm32`, `ibm64` | 32, 64 |
 | `DECFloat` | `dec_float`, `dec32`, `dec64` | 32, 64 |
 | `DECFloatG` | `dec_float_g`, `dec64g` | 64 |
+
+## C Extension
+
+Optional NumPy C ufuncs accelerate encodings that would otherwise require per-element loops
+or multi-pass numpy operations. The C extension is compiled automatically during install and
+falls back to pure Python when unavailable. Set `BYTEFORGE_NO_C=1` to force the pure-Python
+path.
+
+Encodings with C ufuncs: BCD, GrayCode (decode), MilStd1750A, TIFloat, IBMFloat,
+DECFloat, and DECFloatG.
 
 ## Development
 

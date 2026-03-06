@@ -47,26 +47,34 @@ class Encoding(ABC):
     """Abstract base class for bit-width encoders.
 
     All encode/decode operations are fully vectorized -- they accept
-    and return ``np.ndarray``. Scalar values should be wrapped in a
-    1-element array by the caller.
+    and return ``np.ndarray``. Scalars are also accepted and returned
+    as scalars.
 
     Args:
         bit_width: Number of bits for the encoding (1-64).
+        errors: Overflow behavior for ``encode()``:
+
+            - ``"clamp"`` (default): silently clamp to the representable range
+            - ``"raise"``: raise ``OverflowError`` if any value is out of range
 
     Attributes:
         bit_width: Number of bits for the encoding.
         max_unsigned: Maximum unsigned value (``2^bit_width - 1``).
     """
 
-    def __init__(self, bit_width: int) -> None:
+    def __init__(self, bit_width: int, *, errors: str = "clamp") -> None:
+        if errors not in ("clamp", "raise"):
+            raise ValueError(f"errors must be 'clamp' or 'raise', got {errors!r}")
         validate_bit_width(bit_width)
         self.bit_width: int = bit_width
         self.max_unsigned: int = (1 << bit_width) - 1
         self._dn_dtype: type[np.unsignedinteger] = _min_uint_dtype(bit_width)
+        self._errors: str = errors
 
-    @abstractmethod
     def encode(self, values: npt.ArrayLike) -> np.ndarray:
         """Encode physical values to unsigned integer bit patterns.
+
+        Accepts scalars or arrays. If a scalar is passed, a scalar is returned.
 
         Args:
             values: Physical values to encode.
@@ -74,42 +82,106 @@ class Encoding(ABC):
         Returns:
             Array with the minimum unsigned integer dtype that fits
             ``bit_width``, every element in ``[0, 2^bit_width - 1]``.
+            Returns a scalar when given scalar input.
+        """
+        scalar = np.ndim(values) == 0
+        result = self._encode(np.atleast_1d(np.asarray(values)))
+        return result.item() if scalar else result
+
+    @abstractmethod
+    def _encode(self, values: np.ndarray) -> np.ndarray:
+        """Encode physical values (array implementation).
+
+        Subclasses implement this instead of ``encode()``.
+        Input is guaranteed to be at least 1-D.
         """
         ...
 
-    @abstractmethod
     def decode(self, dns: npt.ArrayLike) -> np.ndarray:
         """Decode unsigned integer bit patterns back to physical values.
+
+        Accepts scalars or arrays. If a scalar is passed, a scalar is returned.
 
         Args:
             dns: Unsigned integer bit patterns to decode.
 
         Returns:
             Array of decoded physical values.
+            Returns a scalar when given scalar input.
 
         Raises:
             ValueError: If any DN is outside ``[0, max_unsigned]``.
         """
+        scalar = np.ndim(dns) == 0
+        result = self._decode(np.atleast_1d(np.asarray(dns)))
+        return result.item() if scalar else result
+
+    @abstractmethod
+    def _decode(self, dns: np.ndarray) -> np.ndarray:
+        """Decode unsigned integer bit patterns (array implementation).
+
+        Subclasses implement this instead of ``decode()``.
+        Input is guaranteed to be at least 1-D.
+        """
         ...
 
-    def _validate_dns(self, dns: np.ndarray) -> None:
-        """Validate that all DN values are within range.
+    def _validate_dns(self, dns: npt.ArrayLike) -> np.ndarray:
+        """Validate DN values and return as uint64 array.
+
+        Checks for negative values before casting to uint64 (avoiding silent
+        wrapping), then checks the upper bound.
 
         Args:
-            dns: Array of DN values to validate.
+            dns: DN values to validate.
+
+        Returns:
+            Validated array with dtype uint64.
 
         Raises:
-            ValueError: If any element exceeds ``max_unsigned``.
+            ValueError: If any DN is negative or exceeds ``max_unsigned``.
         """
-        if np.any(dns > self.max_unsigned):
-            bad = dns[dns > self.max_unsigned]
+        arr = np.asarray(dns)
+        if np.isdtype(arr.dtype, "signed integer") and np.any(arr < 0):
+            bad = arr[arr < 0]
+            raise ValueError(
+                f"Negative DN value(s) {bad[:5]} invalid for {self!r}"
+            )
+        arr = arr.astype(np.uint64)
+        if np.any(arr > self.max_unsigned):
+            bad = arr[arr > self.max_unsigned]
             raise ValueError(
                 f"DN value(s) {bad[:5]} out of range for "
-                f"{self.bit_width}-bit encoding (expected 0-{self.max_unsigned})"
+                f"{self!r} (expected 0-{self.max_unsigned})"
+            )
+        return arr
+
+    def _check_overflow(
+        self,
+        values: np.ndarray,
+        lo: Union[float, int],
+        hi: Union[float, int],
+    ) -> None:
+        """Raise OverflowError if values are outside [lo, hi] and errors='raise'.
+
+        Args:
+            values: Values to check.
+            lo: Lower bound (inclusive).
+            hi: Upper bound (inclusive).
+
+        Raises:
+            OverflowError: If ``self._errors == 'raise'`` and any value is
+                outside the range.
+        """
+        if self._errors == "raise" and (np.any(values < lo) or np.any(values > hi)):
+            raise OverflowError(
+                f"Value(s) outside representable range [{lo}, {hi}] for {self!r}"
             )
 
     def to_bytes(self, dns: npt.ArrayLike, byteorder: str = "big") -> np.ndarray:
         """Convert encoded DNs to raw bytes.
+
+        For non-byte-aligned widths (e.g. 12-bit), values are zero-padded
+        in the most significant bits to fill whole bytes.
 
         Args:
             dns: Encoded bit patterns (output of ``encode()``).
@@ -135,6 +207,9 @@ class Encoding(ABC):
     def from_bytes(self, raw: npt.ArrayLike, byteorder: str = "big") -> np.ndarray:
         """Reconstruct encoded DNs from raw bytes.
 
+        For non-byte-aligned widths, the most significant bits of the first
+        byte (big-endian) or last byte (little-endian) are ignored.
+
         Args:
             raw: Byte array with shape ``(..., n_bytes)``, dtype uint8.
             byteorder: ``"big"`` or ``"little"``.
@@ -158,15 +233,20 @@ class Encoding(ABC):
         return result.astype(self._dn_dtype)
 
     @property
+    @abstractmethod
     def value_range(self) -> tuple[Union[float, int], Union[float, int]]:
         """Return the range of representable physical values.
 
         Returns:
             Tuple of ``(min_physical, max_physical)``.
         """
-        lo: Union[float, int] = self.decode(np.array([0]))[0].item()
-        hi: Union[float, int] = self.decode(np.array([self.max_unsigned]))[0].item()
-        return (lo, hi)
+        ...
+
+    def __eq__(self, other: object) -> bool:
+        return type(self) is type(other) and self.__dict__ == other.__dict__
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(bit_width={self.bit_width})"
+
+    def __str__(self) -> str:
+        return f"{type(self).__name__}({self.bit_width})"

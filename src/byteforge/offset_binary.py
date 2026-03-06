@@ -12,15 +12,16 @@ class OffsetBinary(Encoding):
     Maps signed values to unsigned by adding a zero offset of 2^(N-1).
     """
 
-    def __init__(self, bit_width: int) -> None:
-        super().__init__(bit_width)
+    def __init__(self, bit_width: int, *, errors: str = "clamp") -> None:
+        super().__init__(bit_width, errors=errors)
         self._zero_offset = 1 << (bit_width - 1)
         self._min_value = -(1 << (bit_width - 1))
         self._max_value = (1 << (bit_width - 1)) - 1
         self._int_dtype: type[np.signedinteger] = _min_int_dtype(bit_width)
 
-    def encode(self, values: npt.ArrayLike) -> np.ndarray:
+    def _encode(self, values: npt.ArrayLike) -> np.ndarray:
         arr = np.asarray(values)
+        self._check_overflow(arr, self._min_value, self._max_value)
         if np.isdtype(arr.dtype, "integral"):
             clamped = np.clip(arr, self._min_value, self._max_value).astype(np.int64)
         else:
@@ -31,14 +32,35 @@ class OffsetBinary(Encoding):
             ).astype(np.int64)
         return (clamped + self._zero_offset).astype(self._dn_dtype)
 
-    def decode(self, dns: npt.ArrayLike) -> np.ndarray:
-        arr = np.asarray(dns, dtype=np.uint64)
-        self._validate_dns(arr)
+    def _decode(self, dns: npt.ArrayLike) -> np.ndarray:
+        arr = self._validate_dns(dns)
         return (arr.astype(np.int64) - self._zero_offset).astype(self._int_dtype)
 
     @property
     def value_range(self) -> tuple[int, int]:
         return (self._min_value, self._max_value)
+
+    @classmethod
+    def from_range(cls, *, min_value: int, max_value: int) -> "OffsetBinary":
+        """Construct from the signed range that needs to be represented.
+
+        Offset binary has the same range as two's complement:
+        ``[-2^(N-1), 2^(N-1)-1]``.
+
+        Args:
+            min_value: Most negative value to encode.
+            max_value: Most positive value to encode.
+
+        Returns:
+            An OffsetBinary encoding with the minimum required bit width.
+        """
+        if min_value >= 0:
+            bit_width = max_value.bit_length() + 1
+        else:
+            neg_bits = ((-min_value) - 1).bit_length() + 1
+            pos_bits = max_value.bit_length() + 1 if max_value > 0 else 1
+            bit_width = max(neg_bits, pos_bits)
+        return cls(max(1, bit_width))
 
     def __repr__(self) -> str:
         return (

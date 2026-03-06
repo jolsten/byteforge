@@ -5,7 +5,7 @@ Encode and decode numbers as unsigned integer bit patterns (`np.ndarray`).
 ## Structure
 
 - `src/byteforge/` — flat package
-- `_base.py` — abstract `Encoding` base class (encode/decode always take/return `np.ndarray`)
+- `_base.py` — abstract `Encoding` base class (encode/decode accept scalars or arrays)
 - `_registry.py` — `@register` decorator and `create_encoding()` factory
 - 13 encodings: Unsigned, TwosComplement, OnesComplement, IEEE754, LinearScaled, MilStd1750A, BCD, GrayCode, OffsetBinary, Boolean, TIFloat, IBMFloat, DECFloat/DECFloatG
 
@@ -32,3 +32,4 @@ Each encoding module checks `_HAS_C` and dispatches to either the C ufunc or `_e
 - Google style docstrings; use type annotations, not types in docstrings
 - Ruff: rules E, F, W, I, UP, B, SIM; line-length 100
 - Tests use pytest + hypothesis
+- Keep `CHANGELOG.md` up to date under `## Unreleased` for user-facing changes

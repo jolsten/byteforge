@@ -87,7 +87,7 @@ class MilStd1750A(Encoding):
             M_u = (M_high << 16) | M_low
         return M_u, E_u
 
-    def encode(self, values: npt.ArrayLike) -> np.ndarray:
+    def _encode(self, values: npt.ArrayLike) -> np.ndarray:
         fval = np.asarray(values, dtype=np.float64)
 
         if _HAS_C:
@@ -126,9 +126,8 @@ class MilStd1750A(Encoding):
 
         return result.astype(self._dn_dtype)
 
-    def decode(self, dns: npt.ArrayLike) -> np.ndarray:
-        arr = np.asarray(dns, dtype=np.uint64)
-        self._validate_dns(arr)
+    def _decode(self, dns: npt.ArrayLike) -> np.ndarray:
+        arr = self._validate_dns(dns)
 
         if _HAS_C:
             if self.bit_width == 32:
@@ -153,6 +152,15 @@ class MilStd1750A(Encoding):
         M = np.where(M_i >= (1 << (mbits - 1)), M_i - (1 << mbits), M_i)
 
         return M.astype(np.float64) * np.exp2(E.astype(np.float64) - (mbits - 1))
+
+    @property
+    def value_range(self) -> tuple[float, float]:
+        mbits = self._mantissa_bits
+        max_m = (1 << (mbits - 1)) - 1
+        min_m = -(1 << (mbits - 1))
+        max_val = max_m * 2.0 ** (127 - (mbits - 1))
+        min_val = min_m * 2.0 ** (127 - (mbits - 1))
+        return (min_val, max_val)
 
     def __repr__(self) -> str:
         return (

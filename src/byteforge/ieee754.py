@@ -26,13 +26,12 @@ class IEEE754(Encoding):
         self._float_dtype = _FLOAT_DTYPES[bit_width]
         self._uint_dtype = _UINT_DTYPES[bit_width]
 
-    def encode(self, values: npt.ArrayLike) -> np.ndarray:
+    def _encode(self, values: npt.ArrayLike) -> np.ndarray:
         float_arr = np.asarray(values, dtype=self._float_dtype)
         return float_arr.view(self._uint_dtype)
 
-    def decode(self, dns: npt.ArrayLike) -> np.ndarray:
-        arr = np.asarray(dns, dtype=np.uint64)
-        self._validate_dns(arr)
+    def _decode(self, dns: npt.ArrayLike) -> np.ndarray:
+        arr = self._validate_dns(dns)
         native_uint = arr.astype(self._uint_dtype)
         return native_uint.view(self._float_dtype)
 

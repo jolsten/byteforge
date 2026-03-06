@@ -10,8 +10,9 @@ from ._registry import register
 class Unsigned(Encoding):
     """Encodes values as unsigned integers, clamped to [0, 2^bit_width - 1]."""
 
-    def encode(self, values: npt.ArrayLike) -> np.ndarray:
+    def _encode(self, values: npt.ArrayLike) -> np.ndarray:
         arr = np.asarray(values)
+        self._check_overflow(arr, 0, self.max_unsigned)
         if np.isdtype(arr.dtype, "integral"):
             clamped = np.clip(arr, 0, self.max_unsigned).astype(np.uint64)
         else:
@@ -24,9 +25,8 @@ class Unsigned(Encoding):
             clamped = np.clip(np.round(arr.astype(np.float64)), 0, upper).astype(np.uint64)
         return clamped.astype(self._dn_dtype)
 
-    def decode(self, dns: npt.ArrayLike) -> np.ndarray:
-        arr = np.asarray(dns, dtype=np.uint64)
-        self._validate_dns(arr)
+    def _decode(self, dns: npt.ArrayLike) -> np.ndarray:
+        arr = self._validate_dns(dns)
         return arr.astype(self._dn_dtype)
 
     @property

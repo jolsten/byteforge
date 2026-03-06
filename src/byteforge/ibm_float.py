@@ -53,7 +53,7 @@ class IBMFloat(Encoding):
         self._exp_shift = self._mant_bits
         self._sign_shift = bit_width - 1
 
-    def encode(self, values: npt.ArrayLike) -> np.ndarray:
+    def _encode(self, values: npt.ArrayLike) -> np.ndarray:
         fval = np.asarray(values, dtype=np.float64)
 
         if _HAS_C:
@@ -103,9 +103,8 @@ class IBMFloat(Encoding):
         )
         return result.astype(self._dn_dtype)
 
-    def decode(self, dns: npt.ArrayLike) -> np.ndarray:
-        arr = np.asarray(dns, dtype=np.uint64)
-        self._validate_dns(arr)
+    def _decode(self, dns: npt.ArrayLike) -> np.ndarray:
+        arr = self._validate_dns(dns)
 
         if _HAS_C:
             if self.bit_width == 32:
