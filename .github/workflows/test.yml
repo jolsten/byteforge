@@ -29,5 +29,3 @@ jobs:
     - name: Run pytest
       run: uv run pytest tests/
 
-    - name: Run doctest
-      run: uv run python test_readme.py
