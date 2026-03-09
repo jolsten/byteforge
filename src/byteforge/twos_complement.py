@@ -67,7 +67,13 @@ class TwosComplement(Encoding):
 
         Returns:
             A TwosComplement encoding with the minimum required bit width.
+        Raises:
+            ValueError: If ``min_value >= max_value``.
         """
+        if min_value >= max_value:
+            raise ValueError(
+                f"min_value must be less than max_value, got {min_value} >= {max_value}"
+            )
         if min_value >= 0:
             # Need at least 1 sign bit + magnitude bits
             bit_width = max_value.bit_length() + 1

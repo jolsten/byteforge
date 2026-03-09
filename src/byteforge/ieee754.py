@@ -16,7 +16,11 @@ _UINT_DTYPES = {16: np.uint16, 32: np.uint32, 64: np.uint64}
 class IEEE754(Encoding):
     """Encodes float values in IEEE 754 format (16, 32, or 64-bit).
 
-    Uses np.view() for zero-copy bit reinterpretation.
+    Uses ``np.view()`` for zero-copy bit reinterpretation.
+
+    Unlike other float encodings, IEEE754 does not accept an ``encode_errors``
+    parameter because NumPy natively handles all IEEE 754 special values
+    (NaN, ±Inf, subnormals) — there is no out-of-range condition to detect.
     """
 
     def __init__(self, bit_width: int) -> None:

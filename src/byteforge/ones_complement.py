@@ -72,7 +72,13 @@ class OnesComplement(Encoding):
 
         Returns:
             An OnesComplement encoding with the minimum required bit width.
+        Raises:
+            ValueError: If ``min_value >= max_value``.
         """
+        if min_value >= max_value:
+            raise ValueError(
+                f"min_value must be less than max_value, got {min_value} >= {max_value}"
+            )
         magnitude = max(abs(min_value), abs(max_value))
         bit_width = magnitude.bit_length() + 1  # +1 for sign bit
         return cls(max(2, bit_width))

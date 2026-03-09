@@ -153,16 +153,22 @@ class Encoding(ABC):
             ValueError: If any DN is negative or exceeds ``max_unsigned``.
         """
         arr = np.asarray(dns)
+        if np.isdtype(arr.dtype, "real floating"):
+            raise TypeError(
+                f"decode() expects integer DNs, got dtype {arr.dtype}. "
+                f"Cast to an integer dtype first."
+            )
         if np.isdtype(arr.dtype, "signed integer") and np.any(arr < 0):
             bad = arr[arr < 0]
             raise ValueError(
-                f"Negative DN value(s) {bad[:5]} invalid for {self!r}"
+                f"DN value(s) {bad.ravel()[:5].tolist()} out of range for "
+                f"{self!r} (expected 0-{self.max_unsigned})"
             )
         arr = arr.astype(np.uint64)
         if np.any(arr > self.max_unsigned):
             bad = arr[arr > self.max_unsigned]
             raise ValueError(
-                f"DN value(s) {bad[:5]} out of range for "
+                f"DN value(s) {bad.ravel()[:5].tolist()} out of range for "
                 f"{self!r} (expected 0-{self.max_unsigned})"
             )
         return arr
@@ -202,16 +208,25 @@ class Encoding(ABC):
             return result
 
         if self._encode_errors == "raise":
+            bad = np.asarray(values)[oob]
             raise OverflowError(
-                f"Value(s) outside representable range [{lo}, {hi}] for {self!r}"
+                f"Value(s) {bad.ravel()[:5].tolist()} outside representable range "
+                f"[{lo}, {hi}] for {self!r}"
             )
         if self._encode_errors == "nan":
             out = result.astype(np.float64)
             out[oob] = np.nan
             return out
         # Numeric sentinel
+        sentinel = self._encode_errors
+        max_dn = np.iinfo(self._dn_dtype).max
+        if int(sentinel) < 0 or int(sentinel) > max_dn:
+            raise ValueError(
+                f"Sentinel value {sentinel} does not fit in output dtype "
+                f"{self._dn_dtype.__name__} (range 0-{max_dn})"
+            )
         out = result.copy()
-        out[oob] = self._dn_dtype(self._encode_errors)
+        out[oob] = self._dn_dtype(sentinel)
         return out
 
     def to_bytes(self, dns: npt.ArrayLike, byteorder: str = "big") -> np.ndarray:

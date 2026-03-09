@@ -63,6 +63,7 @@ class DECFloat(Encoding):
         self._init_masks()
 
     def _init_masks(self) -> None:
+        """Compute derived bit masks and shift amounts from field widths."""
         self._mant_mask = (1 << self._mant_bits) - 1
         self._exp_mask = (1 << self._exp_bits) - 1
         self._exp_shift = self._mant_bits

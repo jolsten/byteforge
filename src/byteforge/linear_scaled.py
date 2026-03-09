@@ -16,11 +16,24 @@ class LinearScaled(Encoding):
         encode:  DN = clamp(round((EU - offset) / scale_factor), min_dn, max_dn)
         decode:  EU = scale_factor * DN + offset
 
+    When ``signed=False`` (default), DNs range over ``[0, 2^N - 1]``.
+    When ``signed=True``, DNs range over ``[-2^(N-1), 2^(N-1) - 1]``,
+    but are stored as unsigned bit patterns using two's complement wrapping:
+    negative DNs are mapped to ``[2^(N-1), 2^N - 1]`` on encode and
+    unwrapped back on decode. This allows centering the physical range
+    around a zero DN (e.g. a bipolar sensor with zero at mid-scale).
+
+    Example (signed)::
+
+        enc = LinearScaled(8, scale_factor=0.1, offset=0.0, signed=True)
+        # DN range: -128..127, physical range: -12.8..12.7
+        enc.encode([-1.0])  # -> DN -10, stored as unsigned 246
+
     Args:
         bit_width: Number of bits for the encoding.
         scale_factor: Scale factor for the transfer function (must be non-zero).
         offset: Offset for the transfer function.
-        signed: If True, use signed DN range.
+        signed: If True, use signed DN range (two's complement wrapping).
     """
 
     def __init__(

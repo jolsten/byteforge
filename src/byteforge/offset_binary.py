@@ -57,7 +57,13 @@ class OffsetBinary(Encoding):
 
         Returns:
             An OffsetBinary encoding with the minimum required bit width.
+        Raises:
+            ValueError: If ``min_value >= max_value``.
         """
+        if min_value >= max_value:
+            raise ValueError(
+                f"min_value must be less than max_value, got {min_value} >= {max_value}"
+            )
         if min_value >= 0:
             bit_width = max_value.bit_length() + 1
         else:

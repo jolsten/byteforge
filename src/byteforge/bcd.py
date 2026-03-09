@@ -107,6 +107,18 @@ class BCD(Encoding):
         return self._decode_py(arr)
 
     def _decode_c(self, arr: np.ndarray) -> np.ndarray:
+        """C-accelerated BCD decode with Python fallback for error reporting.
+
+        Uses the C ufunc for bulk decode, then checks for the ``UINT64_MAX``
+        sentinel that the C code returns for invalid nibbles. If any are
+        found, handles them according to ``self._decode_errors``.
+
+        Args:
+            arr: Validated uint64 array of BCD bit patterns.
+
+        Returns:
+            Decoded decimal values. Dtype depends on the decode_errors mode.
+        """
         raw = _c_bcd_decode(arr, np.uint8(self._max_digits))  # type: ignore[possibly-undefined]
         sentinel = np.uint64(np.iinfo(np.uint64).max)
         invalid = raw == sentinel
