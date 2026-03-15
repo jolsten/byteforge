@@ -21,9 +21,11 @@ where = ["src"]
 [dependency-groups]
 dev = [
     "hypothesis>=6.141",
+    "matplotlib>=3.9.4",
     "mypy>=1.19.1",
     "pytest>=8.4",
     "pytest-benchmark>=5.2.3",
+    "python-pptx>=1.0.2",
     "ruff>=0.15.4",
     "setuptools>=64",
     "setuptools-scm>=8",
